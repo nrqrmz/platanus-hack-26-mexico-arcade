@@ -1,4 +1,4 @@
-// Platanus Hack 26 — CDMX Invasion
+// Platanus Hack 26 — Earth Invasion
 // Two-player co-op horizontal shmup. You are the UFOs. Earth fights back.
 
 const GAME_WIDTH = 800;
@@ -17,11 +17,11 @@ const TUNING = {
   maxEggs: 9,
   spawn: { baseInterval: 1700, minInterval: 480, soloMul: 1.6, varietyMs: 3000 },
   intensity: { rampPerSec: 0.007, hpScalePerUnit: 0.18, speedScalePerUnit: 0.03 },
-  xp: { base: 4, growth: 1.18 }, // xp needed for level n = base * growth^(n-1), rounded
+  xp: { base: 3, growth: 1.15 }, // xp needed for level n = base * growth^(n-1), rounded
   scoreTimeBonusPerSec: 2,
   abilities: {
     laser:  { cd: 900,  baseDmg: 14, len: 360 },
-    flame:  { cd: 3000, dur: 1400, dps: 26, range: 150 },
+    flame:  { cd: 3000, dur: 1400, dps: 70, range: 150 },
     shield: { cd: 6000, dur: 4000, orbDmg: 10 },
     bomb:   { cd: 8000, baseR: 80,  dmg: 40 },
     cloak:  { cd: 9000, dur: 3000 },
@@ -67,12 +67,12 @@ const UPGRADES = [
   { id: 'unlock_shield', label: 'UNLOCK: SHIELD', desc: 'Btn4 orbiting guard', applies: (p) => !p.abilities.shield.unlocked, apply: (p) => { p.abilities.shield.unlocked = true; } },
   { id: 'unlock_bomb', label: 'UNLOCK: BOMB', desc: 'Btn5 area blast', applies: (p) => !p.abilities.bomb.unlocked, apply: (p) => { p.abilities.bomb.unlocked = true; } },
   { id: 'unlock_cloak', label: 'UNLOCK: CLOAK', desc: 'Btn6 untargetable', applies: (p) => !p.abilities.cloak.unlocked, apply: (p) => { p.abilities.cloak.unlocked = true; } },
-  { id: 'basic_dmg', label: 'BASIC +DMG', desc: 'Stronger basic shot', applies: (p) => p.abilities.basic.level < 8, apply: (p) => { p.abilities.basic.level += 1; } },
-  { id: 'laser_dmg', label: 'LASER +PWR', desc: 'Stronger/longer laser', applies: (p) => p.abilities.laser.unlocked && p.abilities.laser.level < 8, apply: (p) => { p.abilities.laser.level += 1; } },
-  { id: 'flame_dmg', label: 'FLAME +PWR', desc: 'Hotter flame', applies: (p) => p.abilities.flame.unlocked && p.abilities.flame.level < 8, apply: (p) => { p.abilities.flame.level += 1; } },
-  { id: 'shield_pwr', label: 'SHIELD +PWR', desc: 'More orbs / longer', applies: (p) => p.abilities.shield.unlocked && p.abilities.shield.level < 6, apply: (p) => { p.abilities.shield.level += 1; } },
-  { id: 'bomb_pwr', label: 'BOMB +AREA', desc: 'Bigger blast', applies: (p) => p.abilities.bomb.unlocked && p.abilities.bomb.level < 6, apply: (p) => { p.abilities.bomb.level += 1; } },
-  { id: 'cloak_dur', label: 'CLOAK +TIME', desc: 'Longer invisibility', applies: (p) => p.abilities.cloak.unlocked && p.abilities.cloak.level < 6, apply: (p) => { p.abilities.cloak.level += 1; } },
+  { id: 'basic_dmg', label: 'BASIC +DMG', desc: 'Stronger basic shot', applies: () => true, apply: (p) => { p.abilities.basic.level += 1; } },
+  { id: 'laser_dmg', label: 'LASER +PWR', desc: 'Stronger/longer laser', applies: (p) => p.abilities.laser.unlocked, apply: (p) => { p.abilities.laser.level += 1; } },
+  { id: 'flame_dmg', label: 'FLAME +PWR', desc: 'Hotter flame', applies: (p) => p.abilities.flame.unlocked, apply: (p) => { p.abilities.flame.level += 1; } },
+  { id: 'shield_pwr', label: 'SHIELD +PWR', desc: 'More orbs / longer', applies: (p) => p.abilities.shield.unlocked, apply: (p) => { p.abilities.shield.level += 1; } },
+  { id: 'bomb_pwr', label: 'BOMB +AREA', desc: 'Bigger blast', applies: (p) => p.abilities.bomb.unlocked, apply: (p) => { p.abilities.bomb.level += 1; } },
+  { id: 'cloak_dur', label: 'CLOAK +TIME', desc: 'Longer invisibility', applies: (p) => p.abilities.cloak.unlocked, apply: (p) => { p.abilities.cloak.level += 1; } },
   { id: 'max_hp', label: 'MAX HP +25', desc: 'Tougher hull (heals)', applies: (p) => p.maxHp < 250, apply: (p) => { p.maxHp += 25; p.hp = Math.min(p.maxHp, p.hp + 25); } },
   { id: 'regen', label: 'HP REGEN +', desc: 'Slow self-repair', applies: (p) => p.regenPerSec < 5, apply: (p) => { p.regenPerSec += 1; } },
   { id: 'speed', label: 'SPEED +', desc: 'Faster movement', applies: (p) => p.speedMul < 1.8, apply: (p) => { p.speedMul += 0.12; } },
@@ -792,7 +792,7 @@ function updateFlames(scene, time, delta) {
     const cfg = TUNING.abilities.flame;
     const range = cfg.range + lv * 20;
     const halfH = 22 + lv * 3;
-    const dps = cfg.dps + lv * 5;
+    const dps = cfg.dps + lv * 14;
     const ox = p.sprite.x;
     const oy = p.sprite.y;
     scene.world.enemies.children.iterate((e) => {
@@ -1115,13 +1115,14 @@ function updateEnemyAI(scene, e, time) {
 }
 
 function fireHeroLaser(scene, e, target, time) {
-  const ty = target.sprite.y;
-  const warn = scene.add.rectangle(e.x / 2, ty, e.x, 3, 0xff3a3a, 0.4).setDepth(4);
+  // Beam emanates FROM the hero (its eye level), firing left across the screen.
+  const warn = scene.add.rectangle(e.x / 2, e.y, e.x, 3, 0xff3a3a, 0.4).setDepth(4);
   scene.tweens.add({ targets: warn, alpha: 0.9, duration: 400, yoyo: true, onComplete: () => warn.destroy() });
   scene.time.delayedCall(450, () => {
     if (!scene.world || !e.active) return;
-    const beam = scene.add.rectangle(e.x / 2, ty, e.x, 10, 0xff5a5a, 0.85).setDepth(6);
-    beam.hitRect = new Phaser.Geom.Rectangle(0, ty - 6, e.x, 12);
+    const bx = e.x; const by = e.y;
+    const beam = scene.add.rectangle(bx / 2, by, bx, 10, 0xff5a5a, 0.85).setDepth(6);
+    beam.hitRect = new Phaser.Geom.Rectangle(0, by - 6, bx, 12);
     scene.tweens.add({ targets: beam, alpha: 0, duration: 260, onComplete: () => beam.destroy() });
     const now = scene.time.now;
     for (const p of scene.world.players) {
@@ -1285,7 +1286,7 @@ function createStartScreen(scene) {
   const c = scene.add.container(0, 0).setDepth(15);
   scene.startScreen.container = c;
   c.add(scene.add.rectangle(GAME_WIDTH / 2, GAME_HEIGHT / 2, GAME_WIDTH, GAME_HEIGHT, COLORS.overlay, 0.92));
-  const title = scene.add.text(GAME_WIDTH / 2, 130, 'CDMX INVASION', {
+  const title = scene.add.text(GAME_WIDTH / 2, 130, 'EARTH INVASION', {
     fontFamily: 'monospace', fontSize: '44px', color: '#7cf2ff', fontStyle: 'bold',
   }).setOrigin(0.5);
   c.add(scene.add.text(GAME_WIDTH / 2, 80, 'PLATANUS HACK 26', {
