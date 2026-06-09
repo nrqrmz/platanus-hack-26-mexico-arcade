@@ -1,31 +1,79 @@
-// Platanus Hack 26 — CDMX Edition
-// Two-player brick duel. Dash with Button 1, break the word, keep your paddle alive.
+// Platanus Hack 26 — CDMX Invasion
+// Two-player co-op horizontal shmup. You are the UFOs. Earth fights back.
 
 const GAME_WIDTH = 800;
 const GAME_HEIGHT = 600;
-const STORAGE_KEY = 'platanus-hack-26-standard-highscores';
+const STORAGE_KEY = 'platanus-hack-26-cdmx-invasion-highscores';
 const MAX_HIGH_SCORES = 5;
 const WINNING_NAME_LENGTH = 3;
 
+// Player play-area bounds in world pixels (used by player/enemy clamping in later tasks).
+const PLAY = { minX: 30, maxX: 770, minY: 64, maxY: 560 };
+
+// All balance numbers live here for cheap iteration.
+const TUNING = {
+  player: { speed: 300, radius: 16, maxHp: 100, lives: 3, invuln: 1500, regenPerSec: 0 }, // 0 = no passive regen by default; raised by the HP REGEN upgrade.
+  enemyCapHard: 80,
+  spawn: { baseInterval: 1100, minInterval: 240 },
+  intensity: { rampPerSec: 0.012, hpScalePerUnit: 0.18, speedScalePerUnit: 0.05 },
+  xp: { base: 6, growth: 1.35 }, // xp needed for level n = base * growth^(n-1), rounded
+  scoreTimeBonusPerSec: 2,
+  abilities: {
+    laser:  { cd: 900,  baseDmg: 14, len: 360 },
+    flame:  { cd: 600,  baseDmg: 4,  range: 120 },
+    shield: { cd: 6000, dur: 4000, orbDmg: 10 },
+    bomb:   { cd: 8000, baseR: 80,  dmg: 40 },
+    cloak:  { cd: 9000, dur: 3000 },
+  },
+};
+
 const COLORS = {
-  background: 0x0b0f03,
-  frame: 0x3a3a0a,
-  accent: 0xe1ff00,
-  accentSoft: 0xa8c700,
+  background: 0x05060f,
+  star: 0x9fb0ff,
+  city: 0x10162e,
+  frame: 0x2a2f55,
+  accent: 0x7cf2ff,
   p1: 0xe1ff00,
   p2: 0xff6ec7,
-  red: 0xff7a7a,
-  white: 0xf7ffd8,
-  slate: 0xb8c48d,
-  cell: 0x1a1e05,
-  overlay: 0x0c0e02,
-  backdrop: 0x030504,
-  fieldBg: 0x0a0d0b,
-  brickA: 0x3f4a0e,
-  brickB: 0x6b7f14,
-  brickC: 0xa8c700,
-  brickD: 0xe1ff00,
+  white: 0xf3f7ff,
+  hpFull: 0x4dff7a,
+  hpLow: 0xff5a5a,
+  xp: 0x7cf2ff,
+  cell: 0x121634,
+  overlay: 0x05070f,
+  danger: 0xff7a3a,
+  egg: 0xfff2c8,
 };
+
+const ENEMY_TYPES = {
+  plane:      { tex: 'plane',      hp: 6,  speed: 150, dmgRes: 1,   weight: 10, minI: 0,   score: 10,  xp: 2, radius: 9,  attack: 'none',     contact: 8,  bob: 0 },
+  helicopter: { tex: 'helicopter', hp: 10, speed: 90,  dmgRes: 1,   weight: 9,  minI: 0,   score: 12,  xp: 2, radius: 10, attack: 'straight', contact: 8,  bob: 28, fireMs: 1600, bDmg: 6 },
+  duck:       { tex: 'duck',       hp: 16, speed: 110, dmgRes: 1,   weight: 7,  minI: 0.3, score: 18,  xp: 3, radius: 11, attack: 'duck',     contact: 10, bob: 18 },
+  fighter:    { tex: 'fighter',    hp: 14, speed: 200, dmgRes: 1,   weight: 7,  minI: 0.8, score: 20,  xp: 3, radius: 9,  attack: 'aimed',    contact: 12, bob: 0,  fireMs: 1500, bDmg: 12 },
+  warplane:   { tex: 'warplane',   hp: 26, speed: 120, dmgRes: 1,   weight: 6,  minI: 1.2, score: 26,  xp: 4, radius: 12, attack: 'straight', contact: 14, bob: 0,  fireMs: 1100, bDmg: 12 },
+  stealth:    { tex: 'stealth',    hp: 12, speed: 240, dmgRes: 1,   weight: 5,  minI: 2.0, score: 30,  xp: 5, radius: 9,  attack: 'aimed',    contact: 16, bob: 0,  fireMs: 1700, bDmg: 16, alpha: 0.35 },
+  witch:      { tex: 'witch',      hp: 34, speed: 110, dmgRes: 0.6, weight: 5,  minI: 1.6, score: 34,  xp: 5, radius: 12, attack: 'aimed',    contact: 12, bob: 40, fireMs: 1400, bDmg: 12, bColor: 0x9fe0ff },
+  dragon:     { tex: 'dragon',     hp: 40, speed: 80,  dmgRes: 0.7, weight: 4,  minI: 2.4, score: 44,  xp: 7, radius: 14, attack: 'dragon',   contact: 14, bob: 24 },
+  dolphin:    { tex: 'dolphin',    hp: 18, speed: 150, dmgRes: 1,   weight: 4,  minI: 1.8, score: 28,  xp: 4, radius: 11, attack: 'dolphin',  contact: 10, bob: 60, fireMs: 1600 },
+  hero:       { tex: 'hero',       hp: 60, speed: 70,  dmgRes: 0.1, weight: 3,  minI: 3.0, score: 80,  xp: 12, radius: 12, attack: 'hero',    contact: 20, bob: 0,  fireMs: 2600 },
+};
+
+const UPGRADES = [
+  { id: 'unlock_laser', label: 'UNLOCK: LASER', desc: 'Btn2 piercing beam', applies: (p) => !p.abilities.laser.unlocked, apply: (p) => { p.abilities.laser.unlocked = true; } },
+  { id: 'unlock_flame', label: 'UNLOCK: FLAME', desc: 'Btn3 short cone', applies: (p) => !p.abilities.flame.unlocked, apply: (p) => { p.abilities.flame.unlocked = true; } },
+  { id: 'unlock_shield', label: 'UNLOCK: SHIELD', desc: 'Btn4 orbiting guard', applies: (p) => !p.abilities.shield.unlocked, apply: (p) => { p.abilities.shield.unlocked = true; } },
+  { id: 'unlock_bomb', label: 'UNLOCK: BOMB', desc: 'Btn5 area blast', applies: (p) => !p.abilities.bomb.unlocked, apply: (p) => { p.abilities.bomb.unlocked = true; } },
+  { id: 'unlock_cloak', label: 'UNLOCK: CLOAK', desc: 'Btn6 untargetable', applies: (p) => !p.abilities.cloak.unlocked, apply: (p) => { p.abilities.cloak.unlocked = true; } },
+  { id: 'basic_dmg', label: 'BASIC +DMG', desc: 'Stronger basic shot', applies: (p) => p.abilities.basic.level < 8, apply: (p) => { p.abilities.basic.level += 1; } },
+  { id: 'laser_dmg', label: 'LASER +PWR', desc: 'Stronger/longer laser', applies: (p) => p.abilities.laser.unlocked && p.abilities.laser.level < 8, apply: (p) => { p.abilities.laser.level += 1; } },
+  { id: 'flame_dmg', label: 'FLAME +PWR', desc: 'Hotter flame', applies: (p) => p.abilities.flame.unlocked && p.abilities.flame.level < 8, apply: (p) => { p.abilities.flame.level += 1; } },
+  { id: 'shield_pwr', label: 'SHIELD +PWR', desc: 'More orbs / longer', applies: (p) => p.abilities.shield.unlocked && p.abilities.shield.level < 6, apply: (p) => { p.abilities.shield.level += 1; } },
+  { id: 'bomb_pwr', label: 'BOMB +AREA', desc: 'Bigger blast', applies: (p) => p.abilities.bomb.unlocked && p.abilities.bomb.level < 6, apply: (p) => { p.abilities.bomb.level += 1; } },
+  { id: 'cloak_dur', label: 'CLOAK +TIME', desc: 'Longer invisibility', applies: (p) => p.abilities.cloak.unlocked && p.abilities.cloak.level < 6, apply: (p) => { p.abilities.cloak.level += 1; } },
+  { id: 'max_hp', label: 'MAX HP +25', desc: 'Tougher hull (heals)', applies: (p) => p.maxHp < 250, apply: (p) => { p.maxHp += 25; p.hp = Math.min(p.maxHp, p.hp + 25); } },
+  { id: 'regen', label: 'HP REGEN +', desc: 'Slow self-repair', applies: (p) => p.regenPerSec < 12, apply: (p) => { p.regenPerSec += 3; } },
+  { id: 'speed', label: 'SPEED +', desc: 'Faster movement', applies: (p) => p.speedMul < 1.8, apply: (p) => { p.speedMul += 0.12; } },
+];
 
 const LETTER_GRID = [
   ['A', 'B', 'C', 'D', 'E', 'F', 'G'],
@@ -38,35 +86,47 @@ const LETTER_GRID = [
 // DO NOT replace existing keys — they match the physical arcade cabinet wiring.
 // To add local testing shortcuts, append extra keys to any array.
 const CABINET_KEYS = {
-  P1_U: ['w'],
-  P1_D: ['s'],
-  P1_L: ['a'],
-  P1_R: ['d'],
-  P1_1: ['u'],
-  P1_2: ['i'],
-  P1_3: ['o'],
-  P1_4: ['j'],
-  P1_5: ['k'],
-  P1_6: ['l'],
-  P2_U: ['ArrowUp'],
-  P2_D: ['ArrowDown'],
-  P2_L: ['ArrowLeft'],
-  P2_R: ['ArrowRight'],
-  P2_1: ['r'],
-  P2_2: ['t'],
-  P2_3: ['y'],
-  P2_4: ['f'],
-  P2_5: ['g'],
-  P2_6: ['h'],
-  START1: ['Enter'],
-  START2: ['2'],
+  P1_U: ['w'], P1_D: ['s'], P1_L: ['a'], P1_R: ['d'],
+  P1_1: ['u'], P1_2: ['i'], P1_3: ['o'], P1_4: ['j'], P1_5: ['k'], P1_6: ['l'],
+  P2_U: ['ArrowUp'], P2_D: ['ArrowDown'], P2_L: ['ArrowLeft'], P2_R: ['ArrowRight'],
+  P2_1: ['r'], P2_2: ['t'], P2_3: ['y'], P2_4: ['f'], P2_5: ['g'], P2_6: ['h'],
+  START1: ['Enter'], START2: ['2'],
 };
+
+function getStorage() {
+  if (window.platanusArcadeStorage) return window.platanusArcadeStorage;
+  return {
+    async get(key) { try { const raw = window.localStorage.getItem(key); return raw === null ? { found: false, value: null } : { found: true, value: JSON.parse(raw) }; } catch { return { found: false, value: null }; } },
+    async set(key, value) { window.localStorage.setItem(key, JSON.stringify(value)); },
+  };
+}
+async function storageGet(key) { return getStorage().get(key); }
+async function storageSet(key, value) { return getStorage().set(key, value); }
+
+function isHighScoreEntry(v) {
+  return v && typeof v === 'object' && typeof v.name === 'string' && typeof v.score === 'number' && typeof v.time === 'number' && typeof v.savedAt === 'string';
+}
+async function loadHighScores() {
+  const r = await storageGet(STORAGE_KEY);
+  if (!r.found || !Array.isArray(r.value)) return [];
+  return r.value.filter(isHighScoreEntry).sort((a, b) => b.score - a.score).slice(0, MAX_HIGH_SCORES);
+}
+async function persistHighScore(entry) {
+  const existing = await loadHighScores();
+  const next = existing.concat(entry).sort((a, b) => b.score - a.score).slice(0, MAX_HIGH_SCORES);
+  await storageSet(STORAGE_KEY, next);
+  return next;
+}
+
+function normalizeIncomingKey(key) {
+  if (typeof key !== 'string' || key.length === 0) return '';
+  if (key === ' ') return 'space';
+  return key.toLowerCase();
+}
 
 const KEYBOARD_TO_ARCADE = {};
 for (const [arcadeCode, keys] of Object.entries(CABINET_KEYS)) {
-  for (const key of keys) {
-    KEYBOARD_TO_ARCADE[normalizeIncomingKey(key)] = arcadeCode;
-  }
+  for (const key of keys) KEYBOARD_TO_ARCADE[normalizeIncomingKey(key)] = arcadeCode;
 }
 
 const config = {
@@ -74,718 +134,1121 @@ const config = {
   width: GAME_WIDTH,
   height: GAME_HEIGHT,
   parent: 'game-root',
-  backgroundColor: '#0b0f03',
-  physics: {
-    default: 'arcade',
-    arcade: {
-      gravity: { y: 0 },
-      debug: false,
-    },
-  },
-  scale: {
-    mode: Phaser.Scale.FIT,
-    autoCenter: Phaser.Scale.CENTER_BOTH,
-    width: GAME_WIDTH,
-    height: GAME_HEIGHT,
-  },
-  scene: {
-    preload,
-    create,
-    update,
-  },
+  backgroundColor: '#05060f',
+  physics: { default: 'arcade', arcade: { gravity: { x: 0, y: 0 }, debug: false } },
+  scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH, width: GAME_WIDTH, height: GAME_HEIGHT },
+  scene: { preload, create, update },
 };
 
 new Phaser.Game(config);
 
-function preload() {}
+function preload() {
+  buildTextures(this);
+}
 
 function create() {
   const scene = this;
-
   scene.state = {
     phase: 'loading',
-    scores: { p1: 0, p2: 0 },
-    remainingBricks: 0,
+    elapsed: 0,
+    intensity: 0,
+    score: 0,
     highScores: [],
-    winner: null,
-    winnerLabel: '',
     saveStatus: 'Loading scores...',
-    menu: { cursor: 0, cooldown: 0, lastAxis: 0 },
-    dash: {
-      p1: { activeUntil: 0, cooldownUntil: 0, dir: 0 },
-      p2: { activeUntil: 0, cooldownUntil: 0, dir: 0 },
-    },
-    nameEntry: {
-      letters: [],
-      row: 0,
-      col: 0,
-      moveCooldownUntil: 0,
-      confirmCooldownUntil: 0,
-      lastMoveVector: { x: 0, y: 0 },
-    },
+    menu: { cursor: 0, cooldownUntil: 0, lastAxis: 0 },
+    nameEntry: { letters: [], row: 0, col: 0, moveCooldownUntil: 0, confirmCooldownUntil: 0, lastMoveVector: { x: 0, y: 0 } },
   };
 
-  scene.add.rectangle(GAME_WIDTH / 2, GAME_HEIGHT / 2, GAME_WIDTH, GAME_HEIGHT, COLORS.background);
-  scene.add.rectangle(GAME_WIDTH / 2, GAME_HEIGHT / 2, 760, 560, 0x141a04, 0.94).setStrokeStyle(4, COLORS.frame, 0.8);
-
   createBackground(scene);
-  createHud(scene);
-  createPlayfield(scene);
-  createEndGameUi(scene);
-  createStartScreen(scene);
-  createLeaderboardScreen(scene);
-  createControlsScreen(scene);
-  createPauseScreen(scene);
   createControls(scene);
+  createStartScreen(scene);
+  createPauseScreen(scene);
   showStartScreen(scene);
-
   loadHighScores()
-    .then((highScores) => {
-      scene.state.highScores = highScores;
-      scene.state.saveStatus = 'Finish a duel to save a score.';
-      refreshLeaderboard(scene);
-      refreshStartScreenLeaderboard(scene);
-    })
-    .catch(() => {
-      scene.state.highScores = [];
-      scene.state.saveStatus = 'Storage unavailable. Match runs without saves.';
-      refreshLeaderboard(scene);
-      refreshStartScreenLeaderboard(scene);
-    });
+    .then((hs) => { scene.state.highScores = hs; scene.state.saveStatus = 'Survive to set a score.'; refreshStartLeaderboard(scene); })
+    .catch(() => { scene.state.highScores = []; scene.state.saveStatus = 'Storage unavailable.'; refreshStartLeaderboard(scene); });
 }
 
 function update(time, delta) {
   const scene = this;
-  if (!scene.state) {
-    return;
-  }
-
+  if (!scene.state) return;
+  updateBackground(scene, delta);
   const phase = scene.state.phase;
 
-  if (phase === 'start') {
-    handleStartMenu(scene, time);
+  if (phase === 'start') { handleStartMenu(scene, time); return; }
+  if (phase === 'info') {
+    if (consumeAnyPressedControl(scene, ['START1', 'START2', 'P1_1', 'P2_1'])) { scene.infoScreen.container.setVisible(false); showStartScreen(scene); }
     return;
   }
-
-  if (phase === 'leaderboard') {
-    if (consumeAnyPressedControl(scene, ['START1', 'START2', 'P1_1', 'P2_1', 'P1_2', 'P2_2'])) {
-      scene.leaderScreen.container.setVisible(false);
-      showStartScreen(scene);
-    }
-    return;
-  }
-
-  if (phase === 'controls') {
-    if (consumeAnyPressedControl(scene, ['START1', 'START2', 'P1_1', 'P2_1', 'P1_2', 'P2_2'])) {
-      scene.controlsScreen.container.setVisible(false);
-      showStartScreen(scene);
-    }
-    return;
-  }
-
+  if (phase === 'levelup') { handleLevelUp(scene, time); return; }
   if (phase === 'playing') {
-    updatePaddles(scene, delta, time);
-    updateBallGhostStates(scene);
-    updateBallTrails(scene, time);
-    checkBallEscape(scene);
-    if (consumeAnyPressedControl(scene, ['START1', 'START2'])) {
-      pauseMatch(scene);
+    scene.state.elapsed += delta;
+    scene.state.intensity = scene.state.elapsed / 1000 * TUNING.intensity.rampPerSec;
+    scene.state._bonusAcc = (scene.state._bonusAcc || 0) + (delta / 1000) * TUNING.scoreTimeBonusPerSec;
+    if (scene.state._bonusAcc >= 1) {
+      const add = Math.floor(scene.state._bonusAcc);
+      scene.state.score += add;
+      scene.state._bonusAcc -= add;
     }
+    updatePlayers(scene, time, delta);
+    handlePlayerFire(scene, time);
+    updatePlayerBullets(scene);
+    updateSpawner(scene, time, delta);
+    updateEnemies(scene, time);
+    updateEnemyBullets(scene);
+    updateEggs(scene, time);
+    updateHazards(scene, time, delta);
+    updateShieldOrbs(scene, time);
+    refreshHud(scene);
+    if (consumeAnyPressedControl(scene, ['START1', 'START2'])) pauseMatch(scene);
     return;
   }
-
   if (phase === 'paused') {
-    if (consumeAnyPressedControl(scene, ['START1', 'START2'])) {
-      resumeMatch(scene);
-    }
+    if (consumeAnyPressedControl(scene, ['START1', 'START2'])) resumeMatch(scene);
     return;
   }
-
-  if (phase === 'gameover') {
-    handleNameEntry(scene, time);
-    return;
-  }
-
-  if (phase === 'saved') {
-    if (consumeAnyPressedControl(scene, ['START1', 'START2', 'P1_1', 'P2_1', 'P1_2', 'P2_2'])) {
-      returnToStart(scene);
-    }
-  }
+  if (phase === 'gameover') { handleNameEntry(scene, time); return; }
+  if (phase === 'saved') { if (consumeAnyPressedControl(scene, ['START1', 'START2', 'P1_1', 'P2_1'])) returnToMenu(scene); return; }
 }
 
+// ---- Background (parallax) ----
 function createBackground(scene) {
-  scene.add.rectangle(
-    GAME_WIDTH / 2,
-    GAME_HEIGHT / 2,
-    700,
-    450,
-    COLORS.fieldBg,
-    0.18,
-  );
-}
-
-function createHud(scene) {
-  scene.hud = {};
-
-  scene.hud.title = scene.add
-    .text(GAME_WIDTH / 2, 20, 'PLATANUS HACK 26 BRICKS', {
-      fontFamily: 'monospace',
-      fontSize: '22px',
-      color: '#f7fbff',
-      fontStyle: 'bold',
-      align: 'center',
-    })
-    .setOrigin(0.5, 0);
-
-  scene.hud.subtitle = scene.add
-    .text(
-      GAME_WIDTH / 2,
-      48,
-      '',
-      {
-        fontFamily: 'monospace',
-        fontSize: '11px',
-        color: '#a8ad8a',
-        align: 'center',
-      },
-    )
-    .setOrigin(0.5, 0);
-
-  scene.hud.p1Score = scene.add
-    .text(65, 72, 'P1 00', {
-      fontFamily: 'monospace',
-      fontSize: '28px',
-      color: '#e1ff00',
-      fontStyle: 'bold',
-    })
-    .setOrigin(0, 0.5);
-
-  scene.hud.p2Score = scene.add
-    .text(GAME_WIDTH - 65, 72, 'P2 00', {
-      fontFamily: 'monospace',
-      fontSize: '28px',
-      color: '#ff6ec7',
-      fontStyle: 'bold',
-    })
-    .setOrigin(1, 0.5);
-
-  scene.hud.remaining = scene.add
-    .text(GAME_WIDTH / 2, 72, 'BRICKS 000', {
-      fontFamily: 'monospace',
-      fontSize: '18px',
-      color: '#ffd84d',
-      fontStyle: 'bold',
-    })
-    .setOrigin(0.5);
-
-  scene.hud.status = scene.add
-    .text(GAME_WIDTH / 2, GAME_HEIGHT - 24, '', {
-      fontFamily: 'monospace',
-      fontSize: '14px',
-      color: '#f7fbff',
-      align: 'center',
-    })
-    .setOrigin(0.5);
-
-  scene.hud.scoreColors = {
-    p1: '#e1ff00',
-    p2: '#ff6ec7',
-    penalty: '#ff7a7a',
-  };
-}
-
-function createPlayfield(scene) {
-  scene.playfield = {};
-  const paddleWidth = 112;
-  const paddleHeight = 10;
-  const topBounceLineY = 118;
-  const bottomBounceLineY = GAME_HEIGHT - 72;
-  const wallThickness = 8;
-  const wallGap = 22;
-  const topPaddleY = topBounceLineY - paddleHeight / 2;
-  const bottomPaddleY = bottomBounceLineY + paddleHeight / 2;
-  const topWallY = topBounceLineY - wallGap - wallThickness / 2;
-  const bottomWallY = bottomBounceLineY + wallGap + wallThickness / 2;
-
-  // Walls span full width/height so corners are sealed — balls cannot escape through gaps.
-  scene.playfield.leftWall = scene.add.rectangle(38, GAME_HEIGHT / 2, 14, GAME_HEIGHT, COLORS.frame, 0);
-  scene.playfield.rightWall = scene.add.rectangle(GAME_WIDTH - 38, GAME_HEIGHT / 2, 14, GAME_HEIGHT, COLORS.frame, 0);
-  scene.playfield.topWall = scene.add.rectangle(
-    GAME_WIDTH / 2,
-    topWallY,
-    GAME_WIDTH,
-    wallThickness,
-    COLORS.frame,
-    0,
-  );
-  scene.playfield.bottomWall = scene.add.rectangle(
-    GAME_WIDTH / 2,
-    bottomWallY,
-    GAME_WIDTH,
-    wallThickness,
-    COLORS.frame,
-    0,
-  );
-
-  scene.physics.add.existing(scene.playfield.leftWall, true);
-  scene.physics.add.existing(scene.playfield.rightWall, true);
-  scene.physics.add.existing(scene.playfield.topWall, true);
-  scene.physics.add.existing(scene.playfield.bottomWall, true);
-
-  scene.add.rectangle(
-    GAME_WIDTH / 2,
-    topBounceLineY,
-    700,
-    1,
-    COLORS.frame,
-    0.55,
-  );
-  scene.add.rectangle(
-    GAME_WIDTH / 2,
-    bottomBounceLineY,
-    700,
-    1,
-    COLORS.frame,
-    0.55,
-  );
-
-  scene.playfield.p1Paddle = scene.add.rectangle(
-    GAME_WIDTH / 2,
-    topPaddleY,
-    paddleWidth,
-    paddleHeight,
-    COLORS.p1,
-    1,
-  );
-  scene.playfield.p2Paddle = scene.add.rectangle(
-    GAME_WIDTH / 2,
-    bottomPaddleY,
-    paddleWidth,
-    paddleHeight,
-    COLORS.p2,
-    1,
-  );
-
-  scene.physics.add.existing(scene.playfield.p1Paddle);
-  scene.physics.add.existing(scene.playfield.p2Paddle);
-
-  configurePaddleBody(scene.playfield.p1Paddle.body);
-  configurePaddleBody(scene.playfield.p2Paddle.body);
-
-  scene.playfield.balls = [
-    createBall(scene, GAME_WIDTH / 2 - 120, 170, COLORS.white, 'p1'),
-    createBall(scene, GAME_WIDTH / 2 + 120, GAME_HEIGHT - 170, COLORS.white, 'p2'),
-  ];
-
-  scene.playfield.bricks = scene.physics.add.staticGroup();
-  scene.playfield.ballTrails = scene.add.group();
-
-  for (const ball of scene.playfield.balls) {
-    scene.physics.add.collider(ball, scene.playfield.leftWall);
-    scene.physics.add.collider(ball, scene.playfield.rightWall);
-    scene.physics.add.collider(ball, scene.playfield.topWall);
-    scene.physics.add.collider(ball, scene.playfield.bottomWall);
-    scene.physics.add.collider(
-      ball,
-      scene.playfield.p1Paddle,
-      () => handleBallPaddleCollision(scene, ball, scene.playfield.p1Paddle, 'p1'),
-      () => canBallCollideWithPaddle(ball, 'p1'),
-      scene,
+  scene.bg = { stars: [] };
+  for (let i = 0; i < 60; i += 1) {
+    const s = scene.add.rectangle(
+      Phaser.Math.Between(0, GAME_WIDTH), Phaser.Math.Between(0, GAME_HEIGHT),
+      Phaser.Math.Between(1, 2), Phaser.Math.Between(1, 2), COLORS.star, Phaser.Math.FloatBetween(0.3, 0.9),
     );
-    scene.physics.add.collider(
-      ball,
-      scene.playfield.p2Paddle,
-      () => handleBallPaddleCollision(scene, ball, scene.playfield.p2Paddle, 'p2'),
-      () => canBallCollideWithPaddle(ball, 'p2'),
-      scene,
-    );
-    scene.physics.add.collider(
-      ball,
-      scene.playfield.bricks,
-      (_, brick) => handleBallBrickCollision(scene, ball, brick),
-      undefined,
-      scene,
-    );
+    s.speed = Phaser.Math.FloatBetween(12, 60);
+    scene.bg.stars.push(s);
   }
 }
 
-function createEndGameUi(scene) {
-  scene.endGame = {};
-
-  scene.endGame.container = scene.add.container(0, 0);
-  scene.endGame.container.setDepth(20);
-  scene.endGame.container.setVisible(false);
-
-  const backdrop = scene.add.rectangle(
-    GAME_WIDTH / 2,
-    GAME_HEIGHT / 2,
-    GAME_WIDTH,
-    GAME_HEIGHT,
-    COLORS.backdrop,
-    0.98,
-  );
-  scene.endGame.container.add(backdrop);
-
-  scene.endGame.title = scene.add
-    .text(GAME_WIDTH / 2, 88, 'GAME OVER', {
-      fontFamily: 'monospace',
-      fontSize: '30px',
-      color: '#f7ffd8',
-      fontStyle: 'bold',
-    })
-    .setOrigin(0.5);
-
-  scene.endGame.summary = scene.add
-    .text(GAME_WIDTH / 2, 126, '', {
-      fontFamily: 'monospace',
-      fontSize: '22px',
-      color: '#e1ff00',
-      align: 'center',
-    })
-    .setOrigin(0.5);
-
-  scene.endGame.nameLabel = scene.add
-    .text(GAME_WIDTH / 2, 172, '', {
-      fontFamily: 'monospace',
-      fontSize: '13px',
-      color: '#a8ad8a',
-      align: 'center',
-    })
-    .setOrigin(0.5);
-
-  scene.endGame.nameValue = scene.add
-    .text(GAME_WIDTH / 2, 208, '___', {
-      fontFamily: 'monospace',
-      fontSize: '36px',
-      color: '#ff6ec7',
-      fontStyle: 'bold',
-      align: 'center',
-      letterSpacing: 10,
-    })
-    .setOrigin(0.5);
-
-  scene.endGame.instructions = scene.add
-    .text(
-      GAME_WIDTH / 2,
-      242,
-      'MOVE  PICK',
-      {
-        fontFamily: 'monospace',
-        fontSize: '11px',
-        color: '#a8ad8a',
-        align: 'center',
-      },
-    )
-    .setOrigin(0.5);
-
-  scene.endGame.leaderboardTitle = scene.add
-    .text(GAME_WIDTH / 2, 286, 'SCOREBOARD', {
-      fontFamily: 'monospace',
-      fontSize: '14px',
-      color: '#e1ff00',
-      fontStyle: 'bold',
-      align: 'center',
-    })
-    .setOrigin(0.5);
-
-  scene.endGame.gridLabels = [];
-
-  for (let row = 0; row < LETTER_GRID.length; row += 1) {
-    const rowValues = LETTER_GRID[row];
-    const rowWidth = rowValues.length * 56;
-    for (let col = 0; col < rowValues.length; col += 1) {
-      const value = rowValues[col];
-      const cellX = GAME_WIDTH / 2 - rowWidth / 2 + 28 + col * 56;
-      const cellY = 430 + row * 28;
-
-      const cell = scene.add.rectangle(cellX, cellY, value.length > 1 ? 64 : 42, 24, COLORS.cell, 0.95);
-      cell.setStrokeStyle(2, COLORS.frame, 0.8);
-
-      const label = scene.add
-        .text(cellX, cellY, value, {
-          fontFamily: 'monospace',
-          fontSize: value.length > 1 ? '14px' : '18px',
-          color: '#f7fbff',
-          fontStyle: 'bold',
-          align: 'center',
-        })
-        .setOrigin(0.5);
-
-      scene.endGame.gridLabels.push({ cell, label, row, col, value });
-      scene.endGame.container.add(cell);
-      scene.endGame.container.add(label);
-    }
+function updateBackground(scene, delta) {
+  if (!scene.bg) return;
+  const d = delta / 1000;
+  for (const s of scene.bg.stars) {
+    s.x -= s.speed * d;
+    if (s.x < 0) { s.x = GAME_WIDTH; s.y = Phaser.Math.Between(0, GAME_HEIGHT); }
   }
-
-  scene.endGame.saveStatus = scene.add
-    .text(GAME_WIDTH / 2, 590, '', {
-      fontFamily: 'monospace',
-      fontSize: '11px',
-      color: '#e1ff00',
-      align: 'center',
-    })
-    .setOrigin(0.5);
-
-  scene.endGame.leaderboard = scene.add
-    .text(GAME_WIDTH / 2, 308, '', {
-      fontFamily: 'monospace',
-      fontSize: '12px',
-      color: '#f7ffd8',
-      align: 'center',
-      lineSpacing: 4,
-    })
-    .setOrigin(0.5, 0);
-
-  scene.endGame.container.add(scene.endGame.title);
-  scene.endGame.container.add(scene.endGame.summary);
-  scene.endGame.container.add(scene.endGame.nameLabel);
-  scene.endGame.container.add(scene.endGame.nameValue);
-  scene.endGame.container.add(scene.endGame.instructions);
-  scene.endGame.container.add(scene.endGame.leaderboardTitle);
-  scene.endGame.container.add(scene.endGame.leaderboard);
-  scene.endGame.container.add(scene.endGame.saveStatus);
 }
 
+// ---- Input (reused from starter) ----
 function createControls(scene) {
-  scene.controls = {
-    held: Object.create(null),
-    pressed: Object.create(null),
+  scene.controls = { held: Object.create(null), pressed: Object.create(null) };
+  const onKeyDown = (e) => {
+    const key = normalizeIncomingKey(e.key); if (!key) return;
+    const code = KEYBOARD_TO_ARCADE[key]; if (!code) return;
+    if (!scene.controls.held[code]) scene.controls.pressed[code] = true;
+    scene.controls.held[code] = true;
   };
-
-  const onKeyDown = (event) => {
-    const key = normalizeIncomingKey(event.key);
-    if (!key) {
-      return;
-    }
-
-    const arcadeCode = KEYBOARD_TO_ARCADE[key];
-    if (!arcadeCode) {
-      return;
-    }
-
-    if (!scene.controls.held[arcadeCode]) {
-      scene.controls.pressed[arcadeCode] = true;
-    }
-    scene.controls.held[arcadeCode] = true;
+  const onKeyUp = (e) => {
+    const key = normalizeIncomingKey(e.key); if (!key) return;
+    const code = KEYBOARD_TO_ARCADE[key]; if (!code) return;
+    scene.controls.held[code] = false;
   };
-
-  const onKeyUp = (event) => {
-    const key = normalizeIncomingKey(event.key);
-    if (!key) {
-      return;
-    }
-
-    const arcadeCode = KEYBOARD_TO_ARCADE[key];
-    if (!arcadeCode) {
-      return;
-    }
-
-    scene.controls.held[arcadeCode] = false;
-  };
-
   window.addEventListener('keydown', onKeyDown);
   window.addEventListener('keyup', onKeyUp);
-
   scene.events.once('shutdown', () => {
     window.removeEventListener('keydown', onKeyDown);
     window.removeEventListener('keyup', onKeyUp);
   });
 }
 
-function startMatch(scene) {
-  scene.physics.resume();
-  scene.startScreen.container.setVisible(false);
-  buildTextBricks(scene);
-  resetBalls(scene);
-  scene.state.scores = { p1: 0, p2: 0 };
-  refreshHud(scene);
-  scene.state.phase = 'playing';
-  scene.hud.status.setText('');
+function isControlHeld(scene, code) { return scene.controls.held[code] === true; }
+function consumeAnyPressedControl(scene, codes) {
+  for (const c of codes) if (scene.controls.pressed[c]) { scene.controls.pressed[c] = false; return true; }
+  return false;
+}
+function getVerticalMenuAxis(controls) {
+  let a = 0;
+  if (controls.held.P1_U || controls.held.P2_U) a -= 1;
+  if (controls.held.P1_D || controls.held.P2_D) a += 1;
+  return Phaser.Math.Clamp(a, -1, 1);
+}
+function getHorizontalMenuAxis(controls) {
+  let a = 0;
+  if (controls.held.P1_L || controls.held.P2_L) a -= 1;
+  if (controls.held.P1_R || controls.held.P2_R) a += 1;
+  return Phaser.Math.Clamp(a, -1, 1);
 }
 
+// ---- World setup (called on startMatch) ----
+function createWorld(scene) {
+  if (scene.world) destroyWorld(scene);
+  scene.world = {
+    players: [],
+    enemies: scene.physics.add.group(),
+    enemyBullets: scene.physics.add.group(),
+    playerBullets: scene.physics.add.group(),
+    eggs: scene.physics.add.group(),
+    hazards: scene.add.group(),   // fire columns (manual overlap)
+    orbs: scene.add.group(),      // shield orbs (manual overlap)
+    spawnTimer: 0,
+    levelQueue: [],
+  };
+  scene.world.players.push(createPlayer(scene, 'p1', 'P1', 'ovniP1', COLORS.p1, 140, 200));
+  scene.world.players.push(createPlayer(scene, 'p2', 'P2', 'ovniP2', COLORS.p2, 140, 380));
+  registerCollisions(scene);
+}
+
+function destroyWorld(scene) {
+  if (!scene.world) return;
+  scene.world.enemies.clear(true, true);
+  scene.world.enemyBullets.clear(true, true);
+  scene.world.playerBullets.clear(true, true);
+  scene.world.eggs.clear(true, true);
+  scene.world.hazards.clear(true, true);
+  scene.world.orbs.clear(true, true);
+  for (const p of scene.world.players) p.sprite.destroy();
+  scene.world = null;
+}
+
+function registerCollisions(scene) {
+  const w = scene.world;
+  scene.physics.add.overlap(w.playerBullets, w.enemies, (b, e) => onBulletHitsEnemy(scene, b, e));
+  scene.physics.add.overlap(w.playerBullets, w.eggs, (b, egg) => onBulletHitsEgg(scene, b, egg));
+  for (const p of w.players) {
+    scene.physics.add.overlap(p.sprite, w.enemyBullets, (s, b) => onEnemyBulletHitsPlayer(scene, p, b));
+    scene.physics.add.overlap(p.sprite, w.enemies, (s, e) => onEnemyTouchesPlayer(scene, p, e));
+  }
+  // Shield orbs: register once against the groups (orbs are added/destroyed dynamically).
+  scene.physics.add.overlap(w.orbs, w.enemies, (o, e) => onOrbHitsEnemy(scene, o, e));
+  scene.physics.add.overlap(w.orbs, w.enemyBullets, (o, b) => { if (o.active && b.active) recycle(b); });
+}
+
+function onOrbHitsEnemy(scene, o, e) {
+  if (!o.active || !e.active) return;
+  e.hp -= o.orbDmg * (e.def.dmgRes != null ? e.def.dmgRes : 1);
+  spawnHitSpark(scene, e.x, e.y, 0x7cf2ff);
+  if (e.hp <= 0) killEnemy(scene, e, o.ownerKey);
+}
+
+function onBulletHitsEnemy(scene, b, e) {
+  if (!b.active || !e.active) return;
+  const dmg = (b.damage || 1) * (e.def.dmgRes != null ? e.def.dmgRes : 1);
+  e.hp -= dmg;
+  spawnHitSpark(scene, b.x, b.y, 0xffffff);
+  if (b.pierce > 0) { b.pierce -= 1; } else { recycle(b); }
+  if (e.hp <= 0) killEnemy(scene, e, b.owner);
+}
+
+function onBulletHitsEgg(scene, b, egg) {
+  if (!b.active || !egg.active) return;
+  egg.hp -= (b.damage || 1);
+  if (b.pierce > 0) { b.pierce -= 1; } else { recycle(b); }
+  if (egg.hp <= 0) { spawnHitSpark(scene, egg.x, egg.y, COLORS.egg); recycle(egg); }
+}
+
+function killEnemy(scene, e, ownerKey) {
+  const def = e.def;
+  scene.state.score += def.score;
+  spawnExplosion(scene, e.x, e.y, 0xffcf6a);
+  playSound(scene, 'boom');
+  const owner = scene.world.players.find((p) => p.key === ownerKey && !p.spectator);
+  if (owner) grantXp(scene, owner, def.xp);
+  recycle(e);
+}
+
+function onEnemyBulletHitsPlayer(scene, p, b) {
+  if (!b.active || !p.alive || scene.time.now < p.invulnUntil) return;
+  if (b.effect === 'slow') p.slowUntil = scene.time.now + 2500;
+  damagePlayer(scene, p, b.damage || 5, scene.time.now);
+  recycle(b);
+}
+
+function onEnemyTouchesPlayer(scene, p, e) {
+  if (!e.active || !p.alive || scene.time.now < p.invulnUntil) return;
+  damagePlayer(scene, p, e.def.contact || 8, scene.time.now);
+  if (e.def.attack === 'duck' && e.ai && e.ai.kamikaze) { spawnExplosion(scene, e.x, e.y, COLORS.p1); recycle(e); }
+}
+
+function damagePlayer(scene, p, amount, time) {
+  if (!p.alive) return;
+  p.hp -= amount;
+  spawnHitSpark(scene, p.sprite.x, p.sprite.y, COLORS.hpLow);
+  playSound(scene, 'hurt');
+  if (p.hp <= 0) loseLife(scene, p, time);
+}
+
+function loseLife(scene, p, time) {
+  p.lives -= 1;
+  playSound(scene, 'die');
+  spawnExplosion(scene, p.sprite.x, p.sprite.y, p.color);
+  if (p.lives <= 0) {
+    p.alive = false; p.spectator = true;
+    p.sprite.setVisible(false); p.sprite.body.enable = false;
+    maybeGameOver(scene);
+  } else {
+    p.hp = p.maxHp;
+    p.sprite.setPosition(140, p.key === 'p1' ? 200 : 380);
+    p.invulnUntil = time + TUNING.player.invuln;
+  }
+}
+
+function maybeGameOver(scene) {
+  if (scene.world.players.every((p) => p.spectator)) finishMatch(scene);
+}
+
+function spawnHitSpark(scene, x, y, color) {
+  const s = scene.add.image(x, y, 'spark').setTint(color).setDepth(7);
+  scene.tweens.add({ targets: s, alpha: 0, scale: 0.2, duration: 160, onComplete: () => s.destroy() });
+}
+
+function spawnExplosion(scene, x, y, color) {
+  for (let i = 0; i < 8; i += 1) {
+    const pcl = scene.add.image(x, y, 'spark').setTint(color).setDepth(7);
+    const a = Phaser.Math.FloatBetween(0, Math.PI * 2);
+    const dist = Phaser.Math.Between(14, 40);
+    scene.tweens.add({ targets: pcl, x: x + Math.cos(a) * dist, y: y + Math.sin(a) * dist, alpha: 0, scale: 0.2, duration: Phaser.Math.Between(180, 340), onComplete: () => pcl.destroy() });
+  }
+}
+
+function grantXp(scene, p, amount) {
+  if (p.spectator) return;
+  p.xp += amount;
+  while (p.xp >= p.xpToNext) {
+    p.xp -= p.xpToNext;
+    p.level += 1;
+    p.xpToNext = xpForLevel(p.level);
+    scene.world.levelQueue.push(p);
+  }
+  if (scene.world.levelQueue.length && scene.state.phase === 'playing') enterLevelUp(scene);
+}
+
+function enterLevelUp(scene) {
+  const p = scene.world.levelQueue[0];
+  scene.state.phase = 'levelup';
+  scene.physics.pause();
+  playSound(scene, 'levelup');
+  showCards(scene, p);
+}
+
+function rollCards(p) {
+  const pool = UPGRADES.filter((u) => u.applies(p));
+  Phaser.Utils.Array.Shuffle(pool);
+  return pool.slice(0, 3);
+}
+function createLevelUpUi(scene) {
+  scene.levelUi = {};
+  const c = scene.add.container(0, 0).setDepth(30).setVisible(false);
+  scene.levelUi.container = c;
+  c.add(scene.add.rectangle(GAME_WIDTH / 2, GAME_HEIGHT / 2, GAME_WIDTH, GAME_HEIGHT, COLORS.overlay, 0.9));
+  scene.levelUi.title = scene.add.text(GAME_WIDTH / 2, 110, '', { fontFamily: 'monospace', fontSize: '26px', color: '#7cf2ff', fontStyle: 'bold' }).setOrigin(0.5);
+  scene.levelUi.hint = scene.add.text(GAME_WIDTH / 2, GAME_HEIGHT - 60, 'MOVE < >   CONFIRM BTN1', { fontFamily: 'monospace', fontSize: '12px', color: '#8a93c8' }).setOrigin(0.5);
+  c.add([scene.levelUi.title, scene.levelUi.hint]);
+  scene.levelUi.cards = [];
+  for (let i = 0; i < 3; i += 1) {
+    const x = GAME_WIDTH / 2 + (i - 1) * 230;
+    const bg = scene.add.rectangle(x, 300, 200, 240, COLORS.cell, 0.98).setStrokeStyle(3, COLORS.frame, 1);
+    const name = scene.add.text(x, 240, '', { fontFamily: 'monospace', fontSize: '16px', color: '#f3f7ff', fontStyle: 'bold', align: 'center', wordWrap: { width: 180 } }).setOrigin(0.5);
+    const desc = scene.add.text(x, 320, '', { fontFamily: 'monospace', fontSize: '12px', color: '#9aa3d0', align: 'center', wordWrap: { width: 180 } }).setOrigin(0.5);
+    c.add([bg, name, desc]);
+    scene.levelUi.cards.push({ bg, name, desc });
+  }
+  scene.levelUi.sel = { cursor: 0, cooldown: 0, lastAxis: 0, options: [], player: null };
+}
+
+function showCards(scene, p) {
+  if (!scene.levelUi) createLevelUpUi(scene);
+  const opts = rollCards(p);
+  const sel = scene.levelUi.sel;
+  sel.cursor = 0; sel.cooldown = 0; sel.lastAxis = 0; sel.options = opts; sel.player = p;
+  scene.levelUi.title.setText(`${p.label} — LEVEL ${p.level}!  PICK ONE`).setColor(p.key === 'p1' ? '#e1ff00' : '#ff6ec7');
+  scene.levelUi.cards.forEach((card, i) => {
+    const o = opts[i];
+    if (o) { card.bg.setVisible(true); card.name.setVisible(true).setText(o.label); card.desc.setVisible(true).setText(o.desc); }
+    else { card.bg.setVisible(false); card.name.setVisible(false); card.desc.setVisible(false); }
+  });
+  highlightCards(scene);
+  scene.levelUi.container.setVisible(true);
+}
+
+function highlightCards(scene) {
+  const sel = scene.levelUi.sel;
+  scene.levelUi.cards.forEach((card, i) => {
+    const active = i === sel.cursor && i < sel.options.length;
+    card.bg.setStrokeStyle(3, active ? COLORS.accent : COLORS.frame, 1);
+    card.bg.setFillStyle(active ? 0x1c2350 : COLORS.cell, active ? 1 : 0.98);
+  });
+}
+
+function handleLevelUp(scene, time) {
+  const sel = scene.levelUi.sel;
+  const p = sel.player;
+  const prefix = p.key === 'p1' ? 'P1' : 'P2';
+  let axis = 0;
+  if (scene.controls.held[`${prefix}_L`]) axis -= 1;
+  if (scene.controls.held[`${prefix}_R`]) axis += 1;
+  if (time >= sel.cooldown && axis !== 0 && sel.lastAxis !== axis) {
+    sel.cursor = Phaser.Math.Wrap(sel.cursor + axis, 0, sel.options.length);
+    sel.cooldown = time + 160;
+    highlightCards(scene);
+  }
+  sel.lastAxis = axis;
+  if (consumeAnyPressedControl(scene, [`${prefix}_1`, p.key === 'p1' ? 'START1' : 'START2'])) {
+    const chosen = sel.options[sel.cursor];
+    if (chosen) chosen.apply(p);
+    playSound(scene, 'select');
+    scene.world.levelQueue.shift();
+    if (scene.world.levelQueue.length) showCards(scene, scene.world.levelQueue[0]);
+    else { scene.levelUi.container.setVisible(false); scene.physics.resume(); scene.state.phase = 'playing'; }
+  }
+}
+
+function finishMatch(scene) {
+  if (scene.state.phase === 'gameover' || scene.state.phase === 'saved') return;
+  scene.state.phase = 'gameover';
+  scene.physics.pause();
+  scene.state.finalTime = Math.floor(scene.state.elapsed / 1000);
+  scene.state.saveStatus = scene.state.saveStatus || '';
+  scene.state.nameEntry = { letters: [], row: 0, col: 0, moveCooldownUntil: 0, confirmCooldownUntil: 0, lastMoveVector: { x: 0, y: 0 } };
+  showGameOver(scene);
+}
+
+function createGameOverUi(scene) {
+  scene.over = {};
+  const c = scene.add.container(0, 0).setDepth(35).setVisible(false);
+  scene.over.container = c;
+  c.add(scene.add.rectangle(GAME_WIDTH / 2, GAME_HEIGHT / 2, GAME_WIDTH, GAME_HEIGHT, COLORS.overlay, 0.97));
+  scene.over.title = scene.add.text(GAME_WIDTH / 2, 70, 'INVASION REPELLED', { fontFamily: 'monospace', fontSize: '30px', color: '#ff6ec7', fontStyle: 'bold' }).setOrigin(0.5);
+  scene.over.summary = scene.add.text(GAME_WIDTH / 2, 110, '', { fontFamily: 'monospace', fontSize: '18px', color: '#7cf2ff' }).setOrigin(0.5);
+  scene.over.nameLabel = scene.add.text(GAME_WIDTH / 2, 150, 'ENTER INITIALS', { fontFamily: 'monospace', fontSize: '12px', color: '#9aa3d0' }).setOrigin(0.5);
+  scene.over.nameValue = scene.add.text(GAME_WIDTH / 2, 184, '_ _ _', { fontFamily: 'monospace', fontSize: '32px', color: '#f3f7ff', fontStyle: 'bold' }).setOrigin(0.5);
+  scene.over.saveStatus = scene.add.text(GAME_WIDTH / 2, GAME_HEIGHT - 24, '', { fontFamily: 'monospace', fontSize: '11px', color: '#7cf2ff' }).setOrigin(0.5);
+  c.add([scene.over.title, scene.over.summary, scene.over.nameLabel, scene.over.nameValue, scene.over.saveStatus]);
+  scene.over.gridLabels = [];
+  for (let row = 0; row < LETTER_GRID.length; row += 1) {
+    const vals = LETTER_GRID[row];
+    const rowW = vals.length * 56;
+    for (let col = 0; col < vals.length; col += 1) {
+      const value = vals[col];
+      const x = GAME_WIDTH / 2 - rowW / 2 + 28 + col * 56;
+      const y = 250 + row * 30;
+      const cell = scene.add.rectangle(x, y, value.length > 1 ? 64 : 44, 26, COLORS.cell, 0.95).setStrokeStyle(2, COLORS.frame, 0.9);
+      const label = scene.add.text(x, y, value, { fontFamily: 'monospace', fontSize: value.length > 1 ? '14px' : '18px', color: '#f3f7ff', fontStyle: 'bold' }).setOrigin(0.5);
+      scene.over.gridLabels.push({ cell, label, row, col, value });
+      c.add([cell, label]);
+    }
+  }
+}
+
+function showGameOver(scene) {
+  if (!scene.over) createGameOverUi(scene);
+  scene.over.summary.setText(`SCORE ${scene.state.score}   TIME ${scene.state.finalTime}s`);
+  scene.over.saveStatus.setText(scene.state.saveStatus);
+  refreshNameEntry(scene);
+  updateLetterGridHighlight(scene);
+  scene.over.container.setVisible(true);
+}
+
+function refreshNameEntry(scene) {
+  const letters = scene.state.nameEntry.letters.slice();
+  while (letters.length < WINNING_NAME_LENGTH) letters.push('_');
+  scene.over.nameValue.setText(letters.join(' '));
+}
+
+function updateLetterGridHighlight(scene) {
+  const e = scene.state.nameEntry;
+  for (const item of scene.over.gridLabels) {
+    const active = item.row === e.row && item.col === e.col;
+    item.cell.setFillStyle(active ? COLORS.accent : COLORS.cell, active ? 1 : 0.95);
+    item.cell.setStrokeStyle(2, active ? COLORS.white : COLORS.frame, active ? 1 : 0.9);
+    item.label.setColor(active ? '#04110b' : '#f3f7ff');
+  }
+}
+
+function handleNameEntry(scene, time) {
+  const axisX = getHorizontalMenuAxis(scene.controls);
+  const axisY = getVerticalMenuAxis(scene.controls);
+  const e = scene.state.nameEntry;
+  if (time >= e.moveCooldownUntil && (axisX !== 0 || axisY !== 0) && (e.lastMoveVector.x !== axisX || e.lastMoveVector.y !== axisY)) {
+    if (axisY !== 0) { e.row = Phaser.Math.Wrap(e.row + axisY, 0, LETTER_GRID.length); e.col = Math.min(e.col, LETTER_GRID[e.row].length - 1); }
+    if (axisX !== 0) { e.col = Phaser.Math.Wrap(e.col + axisX, 0, LETTER_GRID[e.row].length); }
+    e.moveCooldownUntil = time + 150;
+    updateLetterGridHighlight(scene);
+  }
+  e.lastMoveVector = { x: axisX, y: axisY };
+  if (time >= e.confirmCooldownUntil && consumeAnyPressedControl(scene, ['P1_1', 'P2_1', 'START1', 'START2'])) {
+    e.confirmCooldownUntil = time + 180;
+    activateCurrentLetter(scene);
+  }
+}
+
+function activateCurrentLetter(scene) {
+  const e = scene.state.nameEntry;
+  const v = LETTER_GRID[e.row][e.col];
+  if (v === 'DEL') { e.letters.pop(); refreshNameEntry(scene); return; }
+  if (v === 'END') {
+    if (!e.letters.length) { scene.over.saveStatus.setText('Pick at least one letter.'); return; }
+    submitHighScore(scene); return;
+  }
+  if (e.letters.length >= WINNING_NAME_LENGTH) e.letters.shift();
+  e.letters.push(v); refreshNameEntry(scene);
+}
+
+function submitHighScore(scene) {
+  if (scene.state.phase !== 'gameover') return;
+  const initials = scene.state.nameEntry.letters.join('').slice(0, WINNING_NAME_LENGTH) || '???';
+  const entry = { name: initials, score: scene.state.score, time: scene.state.finalTime, savedAt: new Date().toISOString().slice(0, 10) };
+  scene.state.phase = 'saved';
+  scene.over.saveStatus.setText(`Saved ${initials}! Press START for menu.`);
+  persistHighScore(entry)
+    .then((next) => { scene.state.highScores = next; refreshStartLeaderboard(scene); })
+    .catch(() => { scene.over.saveStatus.setText('Could not save, result stands.'); });
+}
+
+function returnToMenu(scene) {
+  scene.over.container.setVisible(false);
+  destroyWorld(scene);
+  if (scene.hud && scene.hud.container) { scene.hud.container.destroy(); scene.hud = null; }
+  refreshStartLeaderboard(scene);
+  showStartScreen(scene);
+}
+
+function createPlayer(scene, key, label, texture, color, x, y) {
+  const sprite = scene.physics.add.image(x, y, texture);
+  sprite.setCircle(TUNING.player.radius, sprite.width / 2 - TUNING.player.radius, sprite.height / 2 - TUNING.player.radius);
+  sprite.body.setCollideWorldBounds(false);
+  const player = {
+    key, label, color, sprite,
+    hp: TUNING.player.maxHp, maxHp: TUNING.player.maxHp,
+    lives: TUNING.player.lives,
+    alive: true, spectator: false,
+    invulnUntil: 0,
+    speedMul: 1, regenPerSec: TUNING.player.regenPerSec,
+    level: 1, xp: 0, xpToNext: xpForLevel(1),
+    abilities: makeAbilityState(),
+    fireCooldown: {},
+    slowUntil: 0,
+  };
+  sprite.player = player;
+  return player;
+}
+
+function xpForLevel(n) { return Math.round(TUNING.xp.base * Math.pow(TUNING.xp.growth, n - 1)); }
+
+function makeAbilityState() {
+  return {
+    basic:  { unlocked: true,  level: 1 },
+    laser:  { unlocked: false, level: 1 },
+    flame:  { unlocked: false, level: 1 },
+    shield: { unlocked: false, level: 1 },
+    bomb:   { unlocked: false, level: 1 },
+    cloak:  { unlocked: false, level: 1 },
+  };
+}
+
+function updatePlayers(scene, time, delta) {
+  const d = delta / 1000;
+  for (const p of scene.world.players) {
+    if (!p.alive) continue;
+    const prefix = p.key === 'p1' ? 'P1' : 'P2';
+    let vx = 0; let vy = 0;
+    if (isControlHeld(scene, `${prefix}_L`)) vx -= 1;
+    if (isControlHeld(scene, `${prefix}_R`)) vx += 1;
+    if (isControlHeld(scene, `${prefix}_U`)) vy -= 1;
+    if (isControlHeld(scene, `${prefix}_D`)) vy += 1;
+    const slowed = time < p.slowUntil ? 0.5 : 1;
+    const speed = TUNING.player.speed * p.speedMul * slowed;
+    if (vx !== 0 && vy !== 0) { const inv = 1 / Math.sqrt(2); vx *= inv; vy *= inv; }
+    p.sprite.x = Phaser.Math.Clamp(p.sprite.x + vx * speed * d, PLAY.minX, PLAY.maxX);
+    p.sprite.y = Phaser.Math.Clamp(p.sprite.y + vy * speed * d, PLAY.minY, PLAY.maxY);
+    if (p.regenPerSec > 0 && p.hp < p.maxHp) p.hp = Math.min(p.maxHp, p.hp + p.regenPerSec * d);
+    const cloaked = isCloaked(p, time);
+    const blink = time < p.invulnUntil ? (Math.floor(time / 80) % 2 ? 0.35 : 0.9) : 1;
+    p.sprite.setAlpha(cloaked ? 0.3 : blink);
+  }
+}
+
+// ---- Player bullets ----
+function fireBasic(scene, player, time) {
+  const ab = player.abilities.basic;
+  const nextKey = 'basic';
+  const cadence = 280 - (ab.level - 1) * 18; // ms between shots, faster with level
+  if ((player.fireCooldown[nextKey] || 0) > time) return;
+  player.fireCooldown[nextKey] = time + Math.max(110, cadence);
+  spawnPlayerBullet(scene, player, player.sprite.x + 18, player.sprite.y, 520, 0, 6 + (ab.level - 1) * 2);
+  playSound(scene, 'shoot');
+}
+
+function spawnPlayerBullet(scene, player, x, y, vx, vy, damage) {
+  let b = scene.world.playerBullets.getFirstDead(false);
+  if (!b) {
+    b = scene.physics.add.image(x, y, 'pBullet');
+    scene.world.playerBullets.add(b);
+  } else {
+    b.setActive(true).setVisible(true);
+    b.body.enable = true;
+    b.setPosition(x, y);
+  }
+  b.setTexture('pBullet');
+  b.setTint(player.color);
+  b.damage = damage;
+  b.owner = player.key;
+  b.pierce = 0;
+  b.body.setAllowGravity(false);
+  b.body.setVelocity(vx, vy);
+  return b;
+}
+
+function updatePlayerBullets(scene) {
+  scene.world.playerBullets.children.iterate((b) => {
+    if (!b || !b.active) return;
+    if (b.x > GAME_WIDTH + 30 || b.x < -30 || b.y < -30 || b.y > GAME_HEIGHT + 30) recycle(b);
+  });
+}
+
+function recycle(obj) {
+  obj.setActive(false).setVisible(false);
+  if (obj.body) obj.body.enable = false;
+}
+
+function handlePlayerFire(scene, time) {
+  for (const p of scene.world.players) {
+    if (!p.alive) continue;
+    const prefix = p.key === 'p1' ? 'P1' : 'P2';
+    if (isControlHeld(scene, `${prefix}_1`)) fireBasic(scene, p, time);
+    if (scene.controls.pressed[`${prefix}_2`] && p.abilities.laser.unlocked) { scene.controls.pressed[`${prefix}_2`] = false; tryAbility(scene, p, 'laser', time, () => fireLaser(scene, p, time)); }
+    if (scene.controls.pressed[`${prefix}_3`] && p.abilities.flame.unlocked) { scene.controls.pressed[`${prefix}_3`] = false; tryAbility(scene, p, 'flame', time, () => fireFlame(scene, p, time)); }
+    if (scene.controls.pressed[`${prefix}_4`] && p.abilities.shield.unlocked) { scene.controls.pressed[`${prefix}_4`] = false; tryAbility(scene, p, 'shield', time, () => activateShield(scene, p, time)); }
+    if (scene.controls.pressed[`${prefix}_5`] && p.abilities.bomb.unlocked) { scene.controls.pressed[`${prefix}_5`] = false; tryAbility(scene, p, 'bomb', time, () => fireBomb(scene, p, time)); }
+    if (scene.controls.pressed[`${prefix}_6`] && p.abilities.cloak.unlocked) { scene.controls.pressed[`${prefix}_6`] = false; tryAbility(scene, p, 'cloak', time, () => activateCloak(scene, p, time)); }
+  }
+}
+
+function tryAbility(scene, p, id, time, fn) {
+  const cd = TUNING.abilities[id].cd;
+  if ((p.fireCooldown[id] || 0) > time) return;
+  p.fireCooldown[id] = time + cd;
+  fn();
+}
+
+function playSound(scene, type) {
+  try {
+    const ctx = scene.sound && scene.sound.context ? scene.sound.context : null;
+    if (!ctx) return;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain); gain.connect(ctx.destination);
+    const now = ctx.currentTime;
+    const env = (peak, dur, type2, f0, f1) => {
+      osc.type = type2; osc.frequency.setValueAtTime(f0, now);
+      if (f1 != null) osc.frequency.exponentialRampToValueAtTime(f1, now + dur);
+      gain.gain.setValueAtTime(peak, now); gain.gain.exponentialRampToValueAtTime(0.0001, now + dur);
+      osc.start(now); osc.stop(now + dur);
+    };
+    if (type === 'shoot') env(0.05, 0.06, 'square', 720, 480);
+    else if (type === 'laser') env(0.12, 0.18, 'sawtooth', 180, 1200);
+    else if (type === 'flame') env(0.10, 0.16, 'sawtooth', 90, 220);
+    else if (type === 'bomb') env(0.30, 0.40, 'sine', 160, 40);
+    else if (type === 'shield') env(0.12, 0.20, 'triangle', 300, 700);
+    else if (type === 'cloak') env(0.10, 0.30, 'sine', 900, 200);
+    else if (type === 'boom') env(0.20, 0.18, 'square', 420, 120);
+    else if (type === 'hurt') env(0.22, 0.22, 'sawtooth', 240, 70);
+    else if (type === 'die') env(0.30, 0.5, 'sawtooth', 200, 50);
+    else if (type === 'levelup') env(0.16, 0.22, 'square', 500, 1100);
+    else if (type === 'select') env(0.12, 0.10, 'square', 700, 1300);
+    else if (type === 'hatch') env(0.10, 0.10, 'triangle', 300, 600);
+    else if (type === 'fire') env(0.14, 0.25, 'sawtooth', 120, 300);
+    else env(0.08, 0.08, 'square', 600, 600);
+  } catch (_) {}
+}
+
+// ---- Abilities ----
+function fireLaser(scene, p, time) {
+  const lv = p.abilities.laser.level;
+  const cfg = TUNING.abilities.laser;
+  const dmg = cfg.baseDmg + (lv - 1) * 8;
+  const b = spawnPlayerBullet(scene, p, p.sprite.x + 18, p.sprite.y, 900, 0, dmg);
+  b.setTint(0x9fe0ff).setScale(1.6, 1.2);
+  b.pierce = 2 + lv;
+  playSound(scene, 'laser');
+}
+
+function fireFlame(scene, p, time) {
+  const lv = p.abilities.flame.level;
+  const cfg = TUNING.abilities.flame;
+  const range = cfg.range + lv * 16;
+  const dmg = cfg.baseDmg + lv * 2;
+  scene.world.enemies.children.iterate((e) => {
+    if (!e || !e.active) return;
+    if (e.x > p.sprite.x && e.x < p.sprite.x + range && Math.abs(e.y - p.sprite.y) < 40 + lv * 4) {
+      e.hp -= dmg * (e.def.dmgRes != null ? e.def.dmgRes : 1);
+      if (e.hp <= 0) killEnemy(scene, e, p.key);
+    }
+  });
+  const cone = scene.add.triangle(p.sprite.x + 16, p.sprite.y, 0, -24, range, -8, range, 8, 0xff9a3a, 0.5).setDepth(6);
+  scene.tweens.add({ targets: cone, alpha: 0, duration: 180, onComplete: () => cone.destroy() });
+  playSound(scene, 'flame');
+}
+
+function activateShield(scene, p, time) {
+  const lv = p.abilities.shield.level;
+  const cfg = TUNING.abilities.shield;
+  const orbCount = 1 + Math.floor(lv / 2);
+  p.shieldUntil = time + cfg.dur + lv * 600;
+  if (!p.orbs) p.orbs = [];
+  for (const o of p.orbs) o.destroy();
+  p.orbs = [];
+  for (let i = 0; i < orbCount; i += 1) {
+    const o = scene.physics.add.image(p.sprite.x, p.sprite.y, 'spark').setTint(0x7cf2ff).setScale(2.4).setDepth(6);
+    o.body.setAllowGravity(false);
+    o.angleOffset = (i / orbCount) * Math.PI * 2;
+    o.orbDmg = cfg.orbDmg + lv * 4;
+    o.ownerKey = p.key;
+    scene.world.orbs.add(o);
+    p.orbs.push(o);
+  }
+  playSound(scene, 'shield');
+}
+
+function updateShieldOrbs(scene, time) {
+  for (const p of scene.world.players) {
+    if (!p.orbs || !p.orbs.length) continue;
+    if (time > (p.shieldUntil || 0)) { for (const o of p.orbs) o.destroy(); p.orbs = []; continue; }
+    const r = 34;
+    p.orbs.forEach((o, i) => {
+      const ang = o.angleOffset + time / 200;
+      o.setPosition(p.sprite.x + Math.cos(ang) * r, p.sprite.y + Math.sin(ang) * r);
+    });
+  }
+}
+
+function fireBomb(scene, p, time) {
+  const lv = p.abilities.bomb.level;
+  const cfg = TUNING.abilities.bomb;
+  const radius = cfg.baseR + lv * 20;
+  const cx = p.sprite.x + 160; const cy = p.sprite.y;
+  const blast = scene.add.circle(cx, cy, radius, COLORS.danger, 0.45).setDepth(6);
+  scene.tweens.add({ targets: blast, alpha: 0, scale: 1.3, duration: 320, onComplete: () => blast.destroy() });
+  scene.world.enemies.children.iterate((e) => {
+    if (!e || !e.active) return;
+    if (Phaser.Math.Distance.Between(cx, cy, e.x, e.y) <= radius) {
+      e.hp -= cfg.dmg * (e.def.dmgRes != null ? e.def.dmgRes : 1);
+      if (e.hp <= 0) killEnemy(scene, e, p.key);
+    }
+  });
+  playSound(scene, 'bomb');
+}
+
+function activateCloak(scene, p, time) {
+  const lv = p.abilities.cloak.level;
+  const cfg = TUNING.abilities.cloak;
+  p.cloakUntil = time + cfg.dur + lv * 700;
+  playSound(scene, 'cloak');
+}
+
+function isCloaked(p, time) { return time < (p.cloakUntil || 0); }
+
+// ---- Enemies ----
+function pickEnemyType(scene) {
+  const I = scene.state.intensity;
+  const pool = [];
+  let total = 0;
+  for (const [name, def] of Object.entries(ENEMY_TYPES)) {
+    if (I < def.minI) continue;
+    const w = def.weight * (1 + Math.max(0, I - def.minI) * 0.15); // tougher enemies grow more common as intensity rises
+    total += w;
+    pool.push({ name, acc: total });
+  }
+  if (!pool.length) return 'plane';
+  const r = Phaser.Math.FloatBetween(0, total);
+  for (const e of pool) if (r <= e.acc) return e.name;
+  return pool[pool.length - 1].name;
+}
+
+function spawnEnemy(scene, name, x, y) {
+  const def = ENEMY_TYPES[name];
+  const I = scene.state.intensity;
+  let e = scene.world.enemies.getFirstDead(false);
+  if (!e) { e = scene.physics.add.image(0, 0, def.tex); scene.world.enemies.add(e); }
+  else { e.setActive(true).setVisible(true); e.body.enable = true; }
+  e.setTexture(def.tex);
+  e.setPosition(x == null ? 820 : x, y == null ? Phaser.Math.Between(80, 540) : y);
+  e.setAlpha(def.alpha != null ? def.alpha : 1);
+  e.body.setAllowGravity(false);
+  e.body.setCircle(def.radius, e.width / 2 - def.radius, e.height / 2 - def.radius);
+  e.etype = name;
+  e.def = def;
+  e.maxHp = Math.round(def.hp * (1 + I * TUNING.intensity.hpScalePerUnit));
+  e.hp = e.maxHp;
+  e.speed = def.speed * (1 + I * TUNING.intensity.speedScalePerUnit);
+  e.baseY = e.y;
+  e.phase = Phaser.Math.FloatBetween(0, Math.PI * 2);
+  e.nextFire = (scene.time.now || 0) + (def.fireMs ? Phaser.Math.Between(400, def.fireMs) : 0);
+  e.ai = {};
+  e.body.setVelocity(-e.speed, 0);
+  return e;
+}
+
+function updateSpawner(scene, time, delta) {
+  const w = scene.world;
+  w.spawnTimer -= delta;
+  const I = scene.state.intensity;
+  const interval = Math.max(TUNING.spawn.minInterval, TUNING.spawn.baseInterval - I * 120);
+  const count = w.enemies.countActive(true);
+  if (w.spawnTimer <= 0 && count < TUNING.enemyCapHard) {
+    w.spawnTimer = interval;
+    spawnEnemy(scene, pickEnemyType(scene), 820, Phaser.Math.Between(80, 540));
+  }
+}
+
+function updateEnemies(scene, time) {
+  scene.world.enemies.children.iterate((e) => {
+    if (!e || !e.active) return;
+    if (e.def.bob) e.y = e.baseY + Math.sin(time / 500 + e.phase) * e.def.bob;
+    if (e.x < -40) { e.x = 820; e.baseY = Phaser.Math.Between(80, 540); e.y = e.baseY; }
+    updateEnemyAI(scene, e, time);
+  });
+}
+
+function nearestAlivePlayer(scene, x, y) {
+  let best = null; let bd = Infinity;
+  for (const p of scene.world.players) {
+    if (!p.alive) continue;
+    if (isCloaked(p, scene.time.now)) continue;
+    const dx = p.sprite.x - x; const dy = p.sprite.y - y; const dd = dx * dx + dy * dy;
+    if (dd < bd) { bd = dd; best = p; }
+  }
+  return best;
+}
+
+function spawnEnemyBullet(scene, x, y, vx, vy, damage, color, effect) {
+  let b = scene.world.enemyBullets.getFirstDead(false);
+  if (!b) { b = scene.physics.add.image(x, y, 'eBullet'); scene.world.enemyBullets.add(b); }
+  else { b.setActive(true).setVisible(true); b.body.enable = true; b.setPosition(x, y); }
+  b.setTexture('eBullet');
+  b.setTint(color || 0xffffff);
+  b.damage = damage;
+  b.effect = effect || null;
+  b.body.setAllowGravity(false);
+  b.body.setVelocity(vx, vy);
+  return b;
+}
+
+function updateEnemyBullets(scene) {
+  scene.world.enemyBullets.children.iterate((b) => {
+    if (!b || !b.active) return;
+    if (b.x < -30 || b.x > GAME_WIDTH + 30 || b.y < -30 || b.y > GAME_HEIGHT + 30) recycle(b);
+  });
+}
+
+function layEgg(scene, x, y) {
+  let egg = scene.world.eggs.getFirstDead(false);
+  if (!egg) { egg = scene.physics.add.image(x, y, 'egg'); scene.world.eggs.add(egg); }
+  else { egg.setActive(true).setVisible(true); egg.body.enable = true; egg.setPosition(x, y); }
+  egg.setTexture('egg');
+  egg.body.setAllowGravity(false);
+  egg.body.setVelocity(0, 0);
+  egg.hp = 3;
+  egg.hatchAt = scene.time.now + 4500;
+  return egg;
+}
+
+function updateEggs(scene, time) {
+  scene.world.eggs.children.iterate((egg) => {
+    if (!egg || !egg.active) return;
+    if (time >= egg.hatchAt) {
+      if (scene.world.enemies.countActive(true) < TUNING.enemyCapHard) {
+        spawnEnemy(scene, 'duck', egg.x, egg.y);
+        recycle(egg);
+        playSound(scene, 'hatch');
+      } else {
+        egg.hatchAt = time + 500;
+      }
+    }
+  });
+}
+
+function spawnFireColumn(scene, x, y) {
+  const h = 120;
+  const col = scene.add.rectangle(x, y, 26, h, COLORS.danger, 0.55).setDepth(5);
+  col.setStrokeStyle(2, 0xffd07a, 0.8);
+  col.dmgPerSec = 26;
+  col.expireAt = scene.time.now + 3500;
+  col.hitRect = new Phaser.Geom.Rectangle(x - 13, y - h / 2, 26, h);
+  scene.world.hazards.add(col);
+  scene.tweens.add({ targets: col, alpha: 0.3, duration: 220, yoyo: true, repeat: -1 });
+  playSound(scene, 'fire');
+}
+
+function updateHazards(scene, time, delta) {
+  scene.world.hazards.children.entries.slice().forEach((col) => {
+    if (!col.active) return;
+    if (time >= col.expireAt) { col.destroy(); return; }
+    const d = delta / 1000;
+    for (const p of scene.world.players) {
+      if (!p.alive || time < p.invulnUntil) continue;
+      if (Phaser.Geom.Rectangle.Contains(col.hitRect, p.sprite.x, p.sprite.y)) {
+        damagePlayer(scene, p, col.dmgPerSec * d, time);
+      }
+    }
+  });
+}
+
+function updateEnemyAI(scene, e, time) {
+  const def = e.def;
+  const fire = def.fireMs && time >= e.nextFire;
+
+  if (def.attack === 'straight') {
+    if (fire) { e.nextFire = time + def.fireMs; spawnEnemyBullet(scene, e.x - 16, e.y, -300, 0, def.bDmg, 0xff8a4a); }
+  } else if (def.attack === 'aimed') {
+    if (fire) {
+      e.nextFire = time + def.fireMs;
+      const t = nearestAlivePlayer(scene, e.x, e.y);
+      if (t) {
+        const ang = Math.atan2(t.sprite.y - e.y, t.sprite.x - e.x);
+        const sp = 300;
+        spawnEnemyBullet(scene, e.x - 14, e.y, Math.cos(ang) * sp, Math.sin(ang) * sp, def.bDmg, def.bColor || 0xff8a4a);
+      }
+    }
+  } else if (def.attack === 'dolphin') {
+    if (fire) {
+      e.nextFire = time + def.fireMs;
+      const t = nearestAlivePlayer(scene, e.x, e.y);
+      if (t) {
+        const ang = Math.atan2(t.sprite.y - e.y, t.sprite.x - e.x);
+        spawnEnemyBullet(scene, e.x - 14, e.y, Math.cos(ang) * 260, Math.sin(ang) * 260, 6, 0x6fd0ff, 'slow');
+      }
+    }
+  } else if (def.attack === 'duck') {
+    if (!e.ai.laid) e.ai.laid = 0;
+    if (e.ai.laid < 3) {
+      if (!e.ai.nextEgg) e.ai.nextEgg = time + 700;
+      if (time >= e.ai.nextEgg) {
+        layEgg(scene, Phaser.Math.Between(PLAY.minX + 40, PLAY.maxX), Phaser.Math.Between(PLAY.minY + 20, PLAY.maxY));
+        e.ai.laid += 1;
+        e.ai.nextEgg = time + 900;
+      }
+    } else if (!e.ai.kamikaze) {
+      e.ai.kamikaze = true;
+      const t = nearestAlivePlayer(scene, e.x, e.y);
+      if (t) {
+        const ang = Math.atan2(t.sprite.y - e.y, t.sprite.x - e.x);
+        e.body.setVelocity(Math.cos(ang) * 320, Math.sin(ang) * 320);
+        e.def = Object.assign({}, def, { bob: 0 });
+      }
+    }
+  } else if (def.attack === 'dragon') {
+    if (fire) {
+      e.nextFire = time + 4200;
+      const t = nearestAlivePlayer(scene, e.x, e.y);
+      const fx = Phaser.Math.Clamp((t ? t.sprite.x : e.x - 120), PLAY.minX, PLAY.maxX);
+      const fy = Phaser.Math.Clamp((t ? t.sprite.y : e.y), 130, GAME_HEIGHT - 70);
+      scene.time.delayedCall(500, () => { if (e.active) spawnFireColumn(scene, fx, fy); });
+    }
+  } else if (def.attack === 'hero') {
+    if (fire) {
+      e.nextFire = time + def.fireMs;
+      const t = nearestAlivePlayer(scene, e.x, e.y);
+      if (t) fireHeroLaser(scene, e, t, time);
+    }
+  }
+}
+
+function fireHeroLaser(scene, e, target, time) {
+  const ty = target.sprite.y;
+  const warn = scene.add.rectangle(e.x / 2, ty, e.x, 3, 0xff3a3a, 0.4).setDepth(4);
+  scene.tweens.add({ targets: warn, alpha: 0.9, duration: 400, yoyo: true, onComplete: () => warn.destroy() });
+  scene.time.delayedCall(450, () => {
+    if (!scene.world || !e.active) return;
+    const beam = scene.add.rectangle(e.x / 2, ty, e.x, 10, 0xff5a5a, 0.85).setDepth(6);
+    beam.hitRect = new Phaser.Geom.Rectangle(0, ty - 6, e.x, 12);
+    scene.tweens.add({ targets: beam, alpha: 0, duration: 260, onComplete: () => beam.destroy() });
+    const now = scene.time.now;
+    for (const p of scene.world.players) {
+      if (p.alive && now >= p.invulnUntil && Phaser.Geom.Rectangle.Contains(beam.hitRect, p.sprite.x, p.sprite.y)) {
+        damagePlayer(scene, p, 28, now);
+      }
+    }
+  });
+}
+
+// ---- Full HUD ----
+function createHud(scene) {
+  if (scene.hud && scene.hud.container) scene.hud.container.destroy();
+  const c = scene.add.container(0, 0).setDepth(10);
+  scene.hud = { container: c, sides: {} };
+  const makeSide = (p, x, originX) => {
+    const label = scene.add.text(x, 6, p.label, { fontFamily: 'monospace', fontSize: '13px', color: p.key === 'p1' ? '#e1ff00' : '#ff6ec7', fontStyle: 'bold' }).setOrigin(originX, 0);
+    const hpBg = scene.add.rectangle(x, 26, 150, 10, 0x222a44, 1).setOrigin(originX, 0.5);
+    const hpFill = scene.add.rectangle(originX === 0 ? x : x - 150, 26, 150, 10, COLORS.hpFull, 1).setOrigin(0, 0.5);
+    const lives = scene.add.text(x, 40, '', { fontFamily: 'monospace', fontSize: '12px', color: '#f3f7ff' }).setOrigin(originX, 0);
+    const xpBg = scene.add.rectangle(x, 56, 150, 5, 0x222a44, 1).setOrigin(originX, 0.5);
+    const xpFill = scene.add.rectangle(originX === 0 ? x : x - 150, 56, 0, 5, COLORS.xp, 1).setOrigin(0, 0.5);
+    const ab = scene.add.text(x, 64, '', { fontFamily: 'monospace', fontSize: '11px', color: '#9aa3d0' }).setOrigin(originX, 0);
+    c.add([label, hpBg, hpFill, lives, xpBg, xpFill, ab]);
+    return { hpFill, hpBg, lives, xpFill, ab, x, originX };
+  };
+  scene.hud.sides.p1 = makeSide(scene.world.players[0], 12, 0);
+  scene.hud.sides.p2 = makeSide(scene.world.players[1], GAME_WIDTH - 12, 1);
+  scene.hud.center = scene.add.text(GAME_WIDTH / 2, 6, '', { fontFamily: 'monospace', fontSize: '14px', color: '#7cf2ff', fontStyle: 'bold', align: 'center' }).setOrigin(0.5, 0);
+  c.add(scene.hud.center);
+}
+
+function refreshHud(scene) {
+  const time = scene.time.now;
+  const abIcons = [['1', 'basic'], ['2', 'laser'], ['3', 'flame'], ['4', 'shield'], ['5', 'bomb'], ['6', 'cloak']];
+  for (const p of scene.world.players) {
+    const s = scene.hud.sides[p.key];
+    const hpPct = Phaser.Math.Clamp(p.hp / p.maxHp, 0, 1);
+    s.hpFill.width = 150 * hpPct;
+    s.hpFill.x = s.originX === 0 ? s.x : s.x - 150;
+    s.hpFill.setFillStyle(hpPct > 0.35 ? COLORS.hpFull : COLORS.hpLow, 1);
+    s.lives.setText(p.spectator ? 'OUT' : `LIVES ${'♥'.repeat(Math.max(0, p.lives))}  LV${p.level}`);
+    const xpPct = Phaser.Math.Clamp(p.xp / p.xpToNext, 0, 1);
+    s.xpFill.width = 150 * xpPct;
+    s.xpFill.x = s.originX === 0 ? s.x : s.x - 150;
+    const row = abIcons.map(([n, id]) => {
+      const a = p.abilities[id];
+      if (!a.unlocked) return `${n}·`;
+      const ready = (p.fireCooldown[id] || 0) <= time;
+      return ready ? `${n}●` : `${n}○`;
+    }).join(' ');
+    s.ab.setText(row);
+  }
+  scene.hud.center.setText(`SCORE ${scene.state.score}\n${Math.floor(scene.state.elapsed / 1000)}s`);
+}
+
+// ---- Textures (filled in Task 2) ----
+function buildTextures(scene) {
+  const mk = (key, w, h, draw) => {
+    const g = scene.make.graphics({ x: 0, y: 0, add: false });
+    draw(g);
+    g.generateTexture(key, w, h);
+    g.destroy();
+  };
+
+  // 1x1 white for tinted particles/bars
+  mk('px', 2, 2, (g) => g.fillStyle(0xffffff, 1).fillRect(0, 0, 2, 2));
+
+  // UFO (saucer): dome + disc. Two color variants.
+  const saucer = (g, body) => {
+    g.fillStyle(0x223, 0); // no-op to keep signature consistent
+    g.fillStyle(body, 1).fillEllipse(18, 20, 34, 14);     // disc
+    g.fillStyle(0xcfe8ff, 1).fillEllipse(18, 13, 18, 14); // dome
+    g.fillStyle(0x9fd0ff, 0.6).fillEllipse(18, 12, 10, 8);
+    g.fillStyle(0xffffff, 1).fillCircle(8, 22, 2).fillCircle(18, 24, 2).fillCircle(28, 22, 2); // lights
+  };
+  mk('ovniP1', 36, 30, (g) => saucer(g, COLORS.p1));
+  mk('ovniP2', 36, 30, (g) => saucer(g, COLORS.p2));
+
+  // Player bullet (right-going energy bolt)
+  mk('pBullet', 14, 6, (g) => { g.fillStyle(0xffffff, 1).fillRect(0, 1, 14, 4); g.fillStyle(COLORS.accent, 1).fillRect(0, 0, 10, 6); });
+  // Enemy bullet (red orb)
+  mk('eBullet', 8, 8, (g) => { g.fillStyle(0xff8a4a, 1).fillCircle(4, 4, 4); g.fillStyle(0xfff0c0, 1).fillCircle(4, 4, 2); });
+  // Egg
+  mk('egg', 16, 20, (g) => { g.fillStyle(COLORS.egg, 1).fillEllipse(8, 11, 14, 18); g.fillStyle(0xd8c79a, 1).fillEllipse(8, 14, 8, 6); });
+  // Spark particle
+  mk('spark', 6, 6, (g) => g.fillStyle(0xffffff, 1).fillRect(0, 0, 6, 6));
+
+  // Enemies — all face LEFT (they move left). Keep ~30-44px.
+  mk('helicopter', 44, 22, (g) => {
+    g.fillStyle(0x6f7a4a, 1).fillRoundedRect(6, 8, 26, 10, 4);   // body
+    g.fillStyle(0x9fb06a, 1).fillRect(2, 12, 6, 4);              // tail
+    g.fillStyle(0xcfe8ff, 0.8).fillRect(8, 9, 8, 6);            // cockpit
+    g.fillStyle(0xdddddd, 1).fillRect(2, 4, 38, 2);            // rotor
+  });
+  mk('plane', 40, 18, (g) => {
+    g.fillStyle(0xc8ccd6, 1).fillTriangle(0, 9, 34, 3, 34, 15); // fuselage pointing left
+    g.fillStyle(0x8a93c8, 1).fillTriangle(20, 9, 38, 0, 30, 9);
+    g.fillStyle(0x8a93c8, 1).fillTriangle(20, 9, 38, 18, 30, 9);
+  });
+  mk('duck', 30, 26, (g) => {
+    g.fillStyle(0xffe24d, 1).fillEllipse(16, 16, 22, 16);       // body
+    g.fillStyle(0xffe24d, 1).fillCircle(7, 9, 7);               // head
+    g.fillStyle(0xff8a3a, 1).fillTriangle(0, 9, 7, 6, 7, 12);   // beak (left)
+    g.fillStyle(0x222222, 1).fillCircle(6, 8, 1.5);             // eye
+    g.fillStyle(0xf0c83a, 1).fillTriangle(18, 10, 28, 4, 26, 14); // wing
+  });
+  mk('fighter', 42, 16, (g) => {
+    g.fillStyle(0x3a4a6a, 1).fillTriangle(0, 8, 40, 2, 40, 14);
+    g.fillStyle(0x6fa8ff, 1).fillTriangle(18, 8, 36, 1, 30, 8);
+    g.fillStyle(0x6fa8ff, 1).fillTriangle(18, 8, 36, 15, 30, 8);
+    g.fillStyle(0xcfe8ff, 0.8).fillCircle(8, 8, 2);
+  });
+  mk('warplane', 48, 22, (g) => {
+    g.fillStyle(0x5a5f3a, 1).fillTriangle(0, 11, 44, 4, 44, 18);
+    g.fillStyle(0x3f4a2e, 1).fillRect(20, 2, 14, 18);          // wings
+    g.fillStyle(0x222222, 1).fillRect(6, 9, 6, 4);
+  });
+  mk('stealth', 46, 16, (g) => {
+    g.fillStyle(0x2a2f55, 1).fillTriangle(0, 8, 46, 0, 46, 16); // dark delta
+    g.fillStyle(0x4a5285, 1).fillTriangle(0, 8, 24, 4, 24, 12);
+  });
+  mk('witch', 34, 30, (g) => {
+    g.fillStyle(0x6b3fa0, 1).fillTriangle(10, 2, 4, 16, 22, 16); // hat
+    g.fillStyle(0x3a2a4a, 1).fillRect(6, 16, 16, 10);          // robe
+    g.fillStyle(0xe8c8a0, 1).fillCircle(13, 14, 4);            // face
+    g.fillStyle(0x8a5a2a, 1).fillRect(2, 24, 30, 2);          // broom
+  });
+  mk('hero', 28, 36, (g) => {
+    g.fillStyle(0x2a44ff, 1).fillRect(8, 10, 12, 22);         // blue body
+    g.fillStyle(0xe8c8a0, 1).fillCircle(14, 8, 6);            // head
+    g.fillStyle(0xff3a3a, 1).fillTriangle(20, 12, 28, 20, 20, 28); // cape
+    g.fillStyle(0xffe24d, 1).fillRect(11, 16, 6, 4);          // emblem
+  });
+  mk('dragon', 48, 34, (g) => {
+    g.fillStyle(0x3aa84a, 1).fillEllipse(28, 18, 32, 20);     // body
+    g.fillStyle(0x3aa84a, 1).fillTriangle(0, 18, 14, 10, 14, 26); // head left
+    g.fillStyle(0xff5a3a, 1).fillCircle(4, 18, 2);            // mouth glow
+    g.fillStyle(0x267a32, 1).fillTriangle(30, 2, 40, 14, 24, 14); // wing
+  });
+  mk('dolphin', 40, 22, (g) => {
+    g.fillStyle(0x5ab0e8, 1).fillEllipse(22, 12, 32, 14);     // body
+    g.fillStyle(0x5ab0e8, 1).fillTriangle(0, 12, 10, 6, 10, 18); // nose left
+    g.fillStyle(0x3a90c8, 1).fillTriangle(28, 2, 38, 10, 24, 10); // fin
+    g.fillStyle(0xeaf6ff, 1).fillEllipse(22, 16, 20, 5);     // belly
+  });
+}
+
+// ---- Start menu ----
 function createStartScreen(scene) {
   scene.startScreen = {};
-  const c = scene.add.container(0, 0);
-  c.setDepth(15);
+  const c = scene.add.container(0, 0).setDepth(15);
   scene.startScreen.container = c;
-
-  c.add(scene.add.rectangle(GAME_WIDTH / 2, GAME_HEIGHT / 2, GAME_WIDTH, GAME_HEIGHT, COLORS.overlay, 0.97));
-
-  c.add(
-    scene.add
-      .text(GAME_WIDTH / 2, 88, 'PLATANUS HACK 26', {
-        fontFamily: 'monospace', fontSize: '16px', color: '#a8c700',
-      })
-      .setOrigin(0.5),
-  );
-  const titleMain = scene.add
-    .text(GAME_WIDTH / 2, 150, 'CDMX EDITION', {
-      fontFamily: 'monospace', fontSize: '38px', color: '#e1ff00', fontStyle: 'bold',
-    })
-    .setOrigin(0.5);
-  c.add(titleMain);
-  scene.tweens.add({
-    targets: titleMain,
-    scale: 1.025,
-    alpha: 0.88,
-    duration: 1100,
-    yoyo: true,
-    repeat: -1,
-    ease: 'Sine.easeInOut',
-  });
+  c.add(scene.add.rectangle(GAME_WIDTH / 2, GAME_HEIGHT / 2, GAME_WIDTH, GAME_HEIGHT, COLORS.overlay, 0.92));
+  const title = scene.add.text(GAME_WIDTH / 2, 130, 'CDMX INVASION', {
+    fontFamily: 'monospace', fontSize: '44px', color: '#7cf2ff', fontStyle: 'bold',
+  }).setOrigin(0.5);
+  c.add(scene.add.text(GAME_WIDTH / 2, 80, 'PLATANUS HACK 26', {
+    fontFamily: 'monospace', fontSize: '16px', color: '#8a93c8',
+  }).setOrigin(0.5));
+  c.add(title);
+  scene.tweens.add({ targets: title, scale: 1.03, alpha: 0.9, duration: 1100, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
 
   scene.startScreen.buttons = [];
-  const buttonLabels = ['PLAY', 'LEADERBOARD', 'CONTROLS'];
-  for (let i = 0; i < buttonLabels.length; i += 1) {
-    const y = 232 + i * 50;
-    const bg = scene.add.rectangle(GAME_WIDTH / 2, y, 280, 42, COLORS.cell, 0.95);
-    bg.setStrokeStyle(2, COLORS.frame, 0.8);
-    const label = scene.add
-      .text(GAME_WIDTH / 2, y, buttonLabels[i], {
-        fontFamily: 'monospace', fontSize: '22px', color: '#f7ffd8', fontStyle: 'bold',
-      })
-      .setOrigin(0.5);
-    c.add(bg);
-    c.add(label);
+  const labels = ['PLAY', 'LEADERBOARD', 'CONTROLS'];
+  for (let i = 0; i < labels.length; i += 1) {
+    const y = 240 + i * 52;
+    const bg = scene.add.rectangle(GAME_WIDTH / 2, y, 300, 44, COLORS.cell, 0.95).setStrokeStyle(2, COLORS.frame, 0.9);
+    const label = scene.add.text(GAME_WIDTH / 2, y, labels[i], {
+      fontFamily: 'monospace', fontSize: '22px', color: '#f3f7ff', fontStyle: 'bold',
+    }).setOrigin(0.5);
+    c.add(bg); c.add(label);
     scene.startScreen.buttons.push({ bg, label });
   }
-
-  c.add(
-    scene.add
-      .text(GAME_WIDTH / 2, 380, 'SCOREBOARD', {
-        fontFamily: 'monospace', fontSize: '14px', color: '#e1ff00', fontStyle: 'bold',
-      })
-      .setOrigin(0.5),
-  );
-  scene.startScreen.leaderboard = scene.add
-    .text(GAME_WIDTH / 2, 402, '', {
-      fontFamily: 'monospace', fontSize: '13px', color: '#f7ffd8', align: 'center', lineSpacing: 4,
-    })
-    .setOrigin(0.5, 0);
+  c.add(scene.add.text(GAME_WIDTH / 2, GAME_HEIGHT - 24, 'MOVE ↕   CONFIRM BTN1 / START', {
+    fontFamily: 'monospace', fontSize: '11px', color: '#5a628f',
+  }).setOrigin(0.5));
+  c.add(scene.add.text(GAME_WIDTH / 2, 412, 'TOP SURVIVORS', { fontFamily: 'monospace', fontSize: '13px', color: '#7cf2ff', fontStyle: 'bold' }).setOrigin(0.5));
+  scene.startScreen.leaderboard = scene.add.text(GAME_WIDTH / 2, 432, 'NO SCORES YET', { fontFamily: 'monospace', fontSize: '13px', color: '#cdd5ff', align: 'center', lineSpacing: 4 }).setOrigin(0.5, 0);
   c.add(scene.startScreen.leaderboard);
-
-  c.add(
-    scene.add
-      .text(GAME_WIDTH / 2, GAME_HEIGHT - 22, 'MOVE ↕   CONFIRM B / START', {
-        fontFamily: 'monospace', fontSize: '11px', color: '#6f7a4a',
-      })
-      .setOrigin(0.5),
-  );
-
   c.setVisible(false);
+}
+
+function refreshStartLeaderboard(scene) {
+  const hs = scene.state.highScores;
+  const lines = hs.length ? hs.map((e, i) => `${String(i + 1).padStart(2, '0')} ${e.name.padEnd(3, ' ')} ${String(e.score).padStart(6, ' ')}  ${e.time}s`) : ['NO SCORES YET'];
+  if (scene.startScreen.leaderboard) scene.startScreen.leaderboard.setText(lines.join('\n'));
 }
 
 function showStartScreen(scene) {
   scene.state.phase = 'start';
-  scene.state.menu = { cursor: 0, cooldown: 0, lastAxis: 0 };
-  refreshStartScreenLeaderboard(scene);
+  scene.state.menu = { cursor: 0, cooldownUntil: 0, lastAxis: 0 };
   updateStartMenuHighlight(scene);
   scene.startScreen.container.setVisible(true);
-}
-
-function createLeaderboardScreen(scene) {
-  scene.leaderScreen = {};
-  const c = scene.add.container(0, 0);
-  c.setDepth(16);
-  scene.leaderScreen.container = c;
-
-  c.add(scene.add.rectangle(GAME_WIDTH / 2, GAME_HEIGHT / 2, GAME_WIDTH, GAME_HEIGHT, COLORS.overlay, 0.98));
-  c.add(
-    scene.add
-      .text(GAME_WIDTH / 2, 90, 'LEADERBOARD', {
-        fontFamily: 'monospace', fontSize: '30px', color: '#e1ff00', fontStyle: 'bold',
-      })
-      .setOrigin(0.5),
-  );
-
-  scene.leaderScreen.list = scene.add
-    .text(GAME_WIDTH / 2, 160, '', {
-      fontFamily: 'monospace', fontSize: '20px', color: '#f7ffd8',
-      align: 'center', lineSpacing: 12,
-    })
-    .setOrigin(0.5, 0);
-  c.add(scene.leaderScreen.list);
-
-  c.add(
-    scene.add
-      .text(GAME_WIDTH / 2, GAME_HEIGHT - 28, 'PRESS START TO GO BACK', {
-        fontFamily: 'monospace', fontSize: '12px', color: '#6f7a4a',
-      })
-      .setOrigin(0.5),
-  );
-
-  c.setVisible(false);
-}
-
-function createControlsScreen(scene) {
-  scene.controlsScreen = {};
-  const c = scene.add.container(0, 0);
-  c.setDepth(16);
-  scene.controlsScreen.container = c;
-
-  c.add(scene.add.rectangle(GAME_WIDTH / 2, GAME_HEIGHT / 2, GAME_WIDTH, GAME_HEIGHT, COLORS.overlay, 0.98));
-  c.add(
-    scene.add
-      .text(GAME_WIDTH / 2, 110, 'CONTROLS', {
-        fontFamily: 'monospace', fontSize: '30px', color: '#e1ff00', fontStyle: 'bold',
-      })
-      .setOrigin(0.5),
-  );
-
-  const lines = [
-    'P1   MOVE  A / D',
-    'P1   DASH  U',
-    '',
-    'P2   MOVE  ← / →',
-    'P2   DASH  R',
-    '',
-    'PAUSE      ENTER',
-  ];
-  c.add(
-    scene.add
-      .text(GAME_WIDTH / 2, 200, lines.join('\n'), {
-        fontFamily: 'monospace', fontSize: '18px', color: '#f7ffd8',
-        align: 'center', lineSpacing: 8,
-      })
-      .setOrigin(0.5, 0),
-  );
-
-  c.add(
-    scene.add
-      .text(GAME_WIDTH / 2, GAME_HEIGHT - 28, 'PRESS START TO GO BACK', {
-        fontFamily: 'monospace', fontSize: '12px', color: '#6f7a4a',
-      })
-      .setOrigin(0.5),
-  );
-
-  c.setVisible(false);
-}
-
-function showControlsScreen(scene) {
-  scene.startScreen.container.setVisible(false);
-  scene.controlsScreen.container.setVisible(true);
-  scene.state.phase = 'controls';
-}
-
-function showLeaderboardScreen(scene) {
-  const lines = scene.state.highScores.length
-    ? scene.state.highScores.map((e, i) =>
-        `${String(i + 1).padStart(2, '0')}  ${e.name.padEnd(3, ' ')}  ${String(e.score).padStart(3, ' ')}  ${e.winner}`,
-      )
-    : ['NO SAVED SCORES YET'];
-  scene.leaderScreen.list.setText(lines.join('\n'));
-  scene.startScreen.container.setVisible(false);
-  scene.leaderScreen.container.setVisible(true);
-  scene.state.phase = 'leaderboard';
-}
-
-function refreshStartScreenLeaderboard(scene) {
-  const lines = scene.state.highScores.length
-    ? scene.state.highScores.map((e, i) =>
-        `${String(i + 1).padStart(2, '0')} ${e.name.padEnd(3, ' ')} ${String(e.score).padStart(2, '0')} ${e.winner}`,
-      )
-    : ['NO SAVED SCORES YET'];
-  scene.startScreen.leaderboard.setText(lines.join('\n'));
 }
 
 function updateStartMenuHighlight(scene) {
@@ -793,949 +1256,79 @@ function updateStartMenuHighlight(scene) {
   scene.startScreen.buttons.forEach(({ bg, label }, i) => {
     const active = i === cursor;
     bg.setFillStyle(active ? COLORS.accent : COLORS.cell, active ? 1 : 0.95);
-    bg.setStrokeStyle(2, active ? COLORS.white : COLORS.frame, active ? 1 : 0.8);
-    label.setColor(active ? '#04110b' : '#f7ffd8');
+    bg.setStrokeStyle(2, active ? COLORS.white : COLORS.frame, active ? 1 : 0.9);
+    label.setColor(active ? '#04110b' : '#f3f7ff');
   });
 }
 
 function handleStartMenu(scene, time) {
   const menu = scene.state.menu;
   const axisY = getVerticalMenuAxis(scene.controls);
-
-  if (time >= menu.cooldown && axisY !== 0 && menu.lastAxis !== axisY) {
+  if (time >= menu.cooldownUntil && axisY !== 0 && menu.lastAxis !== axisY) {
     menu.cursor = Phaser.Math.Wrap(menu.cursor + axisY, 0, scene.startScreen.buttons.length);
-    menu.cooldown = time + 160;
+    menu.cooldownUntil = time + 160;
     updateStartMenuHighlight(scene);
-    playSound(scene, 'click');
   }
-  if (axisY === 0) {
-    menu.lastAxis = 0;
+  menu.lastAxis = axisY;
+  if (consumeAnyPressedControl(scene, ['P1_1', 'P2_1', 'START1', 'START2'])) {
+    if (menu.cursor === 0) startMatch(scene);
+    else if (menu.cursor === 1) showInfoScreen(scene, 'leaderboard');
+    else showInfoScreen(scene, 'controls');
+  }
+}
+
+function showInfoScreen(scene, kind) {
+  if (!scene.infoScreen) {
+    const c = scene.add.container(0, 0).setDepth(18).setVisible(false);
+    scene.infoScreen = { container: c, body: null };
+    c.add(scene.add.rectangle(GAME_WIDTH / 2, GAME_HEIGHT / 2, GAME_WIDTH, GAME_HEIGHT, COLORS.overlay, 0.98));
+    scene.infoScreen.titleText = scene.add.text(GAME_WIDTH / 2, 80, '', { fontFamily: 'monospace', fontSize: '28px', color: '#7cf2ff', fontStyle: 'bold' }).setOrigin(0.5);
+    scene.infoScreen.body = scene.add.text(GAME_WIDTH / 2, 150, '', { fontFamily: 'monospace', fontSize: '16px', color: '#f3f7ff', align: 'center', lineSpacing: 8 }).setOrigin(0.5, 0);
+    c.add(scene.add.text(GAME_WIDTH / 2, GAME_HEIGHT - 28, 'PRESS START TO GO BACK', { fontFamily: 'monospace', fontSize: '12px', color: '#5a628f' }).setOrigin(0.5));
+    c.add([scene.infoScreen.titleText, scene.infoScreen.body]);
+  }
+  if (kind === 'leaderboard') {
+    scene.infoScreen.titleText.setText('LEADERBOARD');
+    const hs = scene.state.highScores;
+    scene.infoScreen.body.setText(hs.length ? hs.map((e, i) => `${String(i + 1).padStart(2, '0')}  ${e.name.padEnd(3, ' ')}  ${String(e.score).padStart(6, ' ')}  ${e.time}s`).join('\n') : 'NO SCORES YET');
   } else {
-    menu.lastAxis = axisY;
+    scene.infoScreen.titleText.setText('CONTROLS');
+    scene.infoScreen.body.setText([
+      'MOVE      JOYSTICK', '', 'B1 BASIC   B2 LASER   B3 FLAME',
+      'B4 SHIELD  B5 BOMB    B6 CLOAK', '', 'UNLOCK B2-B6 BY LEVELING UP', '', 'START      PAUSE',
+    ].join('\n'));
   }
-
-  if (consumeAnyPressedControl(scene, ['P1_1', 'P2_1', 'P1_2', 'P2_2', 'START1', 'START2'])) {
-    playSound(scene, 'select');
-    startAmbientMusic(scene);
-    if (menu.cursor === 0) {
-      startMatch(scene);
-    } else if (menu.cursor === 1) {
-      showLeaderboardScreen(scene);
-    } else {
-      showControlsScreen(scene);
-    }
-  }
+  scene.startScreen.container.setVisible(false);
+  scene.infoScreen.container.setVisible(true);
+  scene.state.phase = 'info';
 }
 
-function createPauseScreen(scene) {
-  scene.pauseScreen = {};
-  const c = scene.add.container(0, 0);
-  c.setDepth(25);
-  scene.pauseScreen.container = c;
-
-  c.add(scene.add.rectangle(GAME_WIDTH / 2, GAME_HEIGHT / 2, GAME_WIDTH, GAME_HEIGHT, COLORS.overlay, 0.82));
-  c.add(
-    scene.add
-      .text(GAME_WIDTH / 2, GAME_HEIGHT / 2 - 28, 'PAUSED', {
-        fontFamily: 'monospace', fontSize: '52px', color: '#e1ff00', fontStyle: 'bold',
-      })
-      .setOrigin(0.5),
-  );
-  c.add(
-    scene.add
-      .text(GAME_WIDTH / 2, GAME_HEIGHT / 2 + 34, 'PRESS START TO RESUME', {
-        fontFamily: 'monospace', fontSize: '16px', color: '#a8ad8a',
-      })
-      .setOrigin(0.5),
-  );
-
-  c.setVisible(false);
-}
-
-function pauseMatch(scene) {
-  scene.state.phase = 'paused';
-  scene.physics.pause();
-  scene.pauseScreen.container.setVisible(true);
-}
-
-function resumeMatch(scene) {
-  scene.pauseScreen.container.setVisible(false);
+// ---- Match lifecycle (expanded in later tasks) ----
+function startMatch(scene) {
+  scene.startScreen.container.setVisible(false);
+  scene.state.elapsed = 0;
+  scene.state.intensity = 0;
+  scene.state.score = 0;
+  scene.state._bonusAcc = 0;
+  if (scene.sound && scene.sound.context && scene.sound.context.state === 'suspended') scene.sound.context.resume();
+  createWorld(scene);
+  createHud(scene);
   scene.physics.resume();
   scene.state.phase = 'playing';
 }
 
-function returnToStart(scene) {
-  scene.state.winner = null;
-  scene.state.nameEntry.letters = [];
-  scene.endGame.container.setVisible(false);
-  refreshLeaderboard(scene);
-  showStartScreen(scene);
+function createPauseScreen(scene) {
+  scene.pauseScreen = {};
+  const c = scene.add.container(0, 0).setDepth(25);
+  scene.pauseScreen.container = c;
+  c.add(scene.add.rectangle(GAME_WIDTH / 2, GAME_HEIGHT / 2, GAME_WIDTH, GAME_HEIGHT, COLORS.overlay, 0.82));
+  c.add(scene.add.text(GAME_WIDTH / 2, GAME_HEIGHT / 2 - 24, 'PAUSED', {
+    fontFamily: 'monospace', fontSize: '50px', color: '#7cf2ff', fontStyle: 'bold',
+  }).setOrigin(0.5));
+  c.add(scene.add.text(GAME_WIDTH / 2, GAME_HEIGHT / 2 + 34, 'PRESS START TO RESUME', {
+    fontFamily: 'monospace', fontSize: '15px', color: '#8a93c8',
+  }).setOrigin(0.5));
+  c.setVisible(false);
 }
-
-function configurePaddleBody(body) {
-  body.setImmovable(true);
-  body.allowGravity = false;
-  body.setCollideWorldBounds(false);
-}
-
-function createBall(scene, x, y, color, startingOwner) {
-  const ball = scene.add.circle(x, y, 7, color, 1);
-  scene.physics.add.existing(ball);
-
-  ball.body.setCircle(7);
-  ball.body.setBounce(1, 1);
-  ball.body.setCollideWorldBounds(false);
-  ball.body.setAllowGravity(false);
-  ball.body.setDrag(0, 0);
-  ball.body.setMaxVelocity(340, 340);
-  ball.glowColor = color;
-  ball.lastTouchedBy = startingOwner;
-  ball.ghostFor = { p1: false, p2: false };
-  ball.previousY = y;
-
-  return ball;
-}
-
-function buildTextBricks(scene) {
-  scene.playfield.bricks.clear(true, true);
-
-  // The bricks spell CDMX — one big word, letters placed by hand.
-  // Grid 34×28: brickX = 69 + col*20, brickY = 137 + row*12.
-  const brickData = [
-    // C
-    [89,233,1],[109,233,2],[129,233,3],[149,233,0],[169,233,1],
-    [69,245,1],[89,245,2],[169,245,2],[189,245,3],[69,257,2],
-    [89,257,3],[69,269,3],[89,269,0],[69,281,0],[89,281,1],
-    [69,293,1],[89,293,2],[69,305,2],[89,305,3],[69,317,3],
-    [89,317,0],[69,329,0],[89,329,1],[69,341,1],[89,341,2],
-    [169,341,2],[189,341,3],[89,353,3],[109,353,0],[129,353,1],
-    [149,353,2],[169,353,3],
-    // D
-    [249,233,1],[269,233,2],[289,233,3],[309,233,0],[329,233,1],
-    [249,245,2],[269,245,3],[329,245,2],[349,245,3],[249,257,3],
-    [269,257,0],[349,257,0],[369,257,1],[249,269,0],[269,269,1],
-    [349,269,1],[369,269,2],[249,281,1],[269,281,2],[349,281,2],
-    [369,281,3],[249,293,2],[269,293,3],[349,293,3],[369,293,0],
-    [249,305,3],[269,305,0],[349,305,0],[369,305,1],[249,317,0],
-    [269,317,1],[349,317,1],[369,317,2],[249,329,1],[269,329,2],
-    [349,329,2],[369,329,3],[249,341,2],[269,341,3],[329,341,2],
-    [349,341,3],[249,353,3],[269,353,0],[289,353,1],[309,353,2],
-    [329,353,3],
-    // M
-    [429,233,2],[449,233,3],[529,233,3],[549,233,0],[429,245,3],
-    [449,245,0],[469,245,1],[509,245,3],[529,245,0],[549,245,1],
-    [429,257,0],[449,257,1],[489,257,3],[529,257,1],[549,257,2],
-    [429,269,1],[449,269,2],[489,269,0],[529,269,2],[549,269,3],
-    [429,281,2],[449,281,3],[529,281,3],[549,281,0],[429,293,3],
-    [449,293,0],[529,293,0],[549,293,1],[429,305,0],[449,305,1],
-    [529,305,1],[549,305,2],[429,317,1],[449,317,2],[529,317,2],
-    [549,317,3],[429,329,2],[449,329,3],[529,329,3],[549,329,0],
-    [429,341,3],[449,341,0],[529,341,0],[549,341,1],[429,353,0],
-    [449,353,1],[529,353,1],[549,353,2],
-    // X
-    [609,233,3],[629,233,0],[709,233,0],[729,233,1],[629,245,1],
-    [649,245,2],[689,245,0],[709,245,1],[629,257,2],[649,257,3],
-    [689,257,1],[709,257,2],[649,269,0],[669,269,1],[689,269,2],
-    [649,281,1],[669,281,2],[689,281,3],[669,293,3],[649,305,3],
-    [669,305,0],[689,305,1],[649,317,0],[669,317,1],[689,317,2],
-    [629,329,0],[649,329,1],[689,329,3],[709,329,0],[629,341,1],
-    [649,341,2],[689,341,0],[709,341,1],[609,353,1],[629,353,2],
-    [709,353,2],[729,353,3],
-  ];
-
-  const colors = [COLORS.brickA, COLORS.brickB, COLORS.brickC, COLORS.brickD];
-
-  for (const [bx, by, ci] of brickData) {
-    const brick = scene.add.rectangle(bx, by, 18, 10, colors[ci], 1);
-    brick.setStrokeStyle(1, COLORS.cell, 0.7);
-    scene.physics.add.existing(brick, true);
-    scene.playfield.bricks.add(brick);
-  }
-
-  scene.state.remainingBricks = scene.playfield.bricks.countActive(true);
-}
-
-function resetBalls(scene) {
-  const [topBall, bottomBall] = scene.playfield.balls;
-
-  topBall.setPosition(GAME_WIDTH / 2 - 110, 170);
-  bottomBall.setPosition(GAME_WIDTH / 2 + 110, GAME_HEIGHT - 170);
-
-  topBall.lastTouchedBy = 'p1';
-  bottomBall.lastTouchedBy = 'p2';
-  topBall.ghostFor = { p1: false, p2: false };
-  bottomBall.ghostFor = { p1: false, p2: false };
-  topBall.previousY = topBall.y;
-  bottomBall.previousY = bottomBall.y;
-  topBall.setAlpha(1);
-  bottomBall.setAlpha(1);
-
-  topBall.body.setVelocity(190, 210);
-  bottomBall.body.setVelocity(-190, -210);
-}
-
-function updatePaddles(scene, delta, time) {
-  const paddleSpeed = 320;
-  const dashSpeed = 1500;
-  const dashDuration = 110;
-  const dashCooldown = 750;
-  const p1Body = scene.playfield.p1Paddle.body;
-  const p2Body = scene.playfield.p2Paddle.body;
-  const deltaSeconds = delta / 1000;
-
-  let p1Dir = 0;
-  if (isControlHeld(scene, 'P1_L')) p1Dir -= 1;
-  if (isControlHeld(scene, 'P1_R')) p1Dir += 1;
-
-  let p2Dir = 0;
-  if (isControlHeld(scene, 'P2_L')) p2Dir -= 1;
-  if (isControlHeld(scene, 'P2_R')) p2Dir += 1;
-
-  tryStartDash(scene, 'p1', 'P1_1', p1Dir, time, dashDuration, dashCooldown);
-  tryStartDash(scene, 'p2', 'P2_1', p2Dir, time, dashDuration, dashCooldown);
-
-  let p1Velocity = p1Dir * paddleSpeed;
-  let p2Velocity = p2Dir * paddleSpeed;
-
-  if (time < scene.state.dash.p1.activeUntil) {
-    p1Velocity = scene.state.dash.p1.dir * dashSpeed;
-  }
-  if (time < scene.state.dash.p2.activeUntil) {
-    p2Velocity = scene.state.dash.p2.dir * dashSpeed;
-  }
-
-  p1Body.setVelocityX(0);
-  p2Body.setVelocityX(0);
-
-  scene.playfield.p1Paddle.setX(
-    Phaser.Math.Clamp(
-      scene.playfield.p1Paddle.x + p1Velocity * deltaSeconds,
-      110,
-      GAME_WIDTH - 110,
-    ),
-  );
-  scene.playfield.p2Paddle.setX(
-    Phaser.Math.Clamp(
-      scene.playfield.p2Paddle.x + p2Velocity * deltaSeconds,
-      110,
-      GAME_WIDTH - 110,
-    ),
-  );
-
-  if (typeof p1Body.updateFromGameObject === 'function') {
-    p1Body.updateFromGameObject();
-  }
-  if (typeof p2Body.updateFromGameObject === 'function') {
-    p2Body.updateFromGameObject();
-  }
-}
-
-function tryStartDash(scene, playerKey, buttonCode, dir, time, duration, cooldown) {
-  if (!scene.controls.pressed[buttonCode]) return;
-  scene.controls.pressed[buttonCode] = false;
-  if (dir === 0) return;
-  const dashState = scene.state.dash[playerKey];
-  if (time < dashState.cooldownUntil) return;
-  dashState.dir = dir;
-  dashState.activeUntil = time + duration;
-  dashState.cooldownUntil = time + cooldown;
-  playSound(scene, 'dash');
-  spawnDashTrail(scene, playerKey, dir);
-}
-
-function spawnDashTrail(scene, playerKey, dir) {
-  const paddle =
-    playerKey === 'p1' ? scene.playfield.p1Paddle : scene.playfield.p2Paddle;
-  const color = playerKey === 'p1' ? COLORS.p1 : COLORS.p2;
-  const trail = scene.add.rectangle(paddle.x, paddle.y, paddle.width, paddle.height, color, 0.6);
-  scene.tweens.add({
-    targets: trail,
-    x: paddle.x - dir * 50,
-    alpha: 0,
-    scaleX: 0.4,
-    duration: 260,
-    onComplete: () => trail.destroy(),
-  });
-}
-
-function updateBallGhostStates(scene) {
-  const topLine = scene.playfield.p1Paddle.y;
-  const bottomLine = scene.playfield.p2Paddle.y;
-
-  for (const ball of scene.playfield.balls) {
-    const previousY = typeof ball.previousY === 'number' ? ball.previousY : ball.y;
-    const currentY = ball.y;
-
-    if (!ball.ghostFor.p1 && previousY >= topLine && currentY < topLine) {
-      ball.ghostFor.p1 = true;
-      animatePenaltyCounter(scene, 'p1');
-      playSound(scene, 'penalty');
-    } else if (ball.ghostFor.p1 && previousY <= topLine && currentY > topLine) {
-      ball.ghostFor.p1 = false;
-    }
-
-    if (!ball.ghostFor.p2 && previousY <= bottomLine && currentY > bottomLine) {
-      ball.ghostFor.p2 = true;
-      animatePenaltyCounter(scene, 'p2');
-      playSound(scene, 'penalty');
-    } else if (
-      ball.ghostFor.p2 &&
-      previousY >= bottomLine &&
-      currentY < bottomLine
-    ) {
-      ball.ghostFor.p2 = false;
-    }
-
-    ball.setAlpha(ball.ghostFor.p1 || ball.ghostFor.p2 ? 0.45 : 1);
-    ball.previousY = currentY;
-  }
-}
-
-function checkBallEscape(scene) {
-  for (const ball of scene.playfield.balls) {
-    const escaped =
-      !isFinite(ball.x) || !isFinite(ball.y) ||
-      ball.x < 10 || ball.x > GAME_WIDTH - 10 ||
-      ball.y < 10 || ball.y > GAME_HEIGHT - 10;
-    if (!escaped) {
-      continue;
-    }
-    // Ball slipped out — respawn it near centre heading toward the field
-    const vy = ball.lastTouchedBy === 'p1' ? 220 : -220;
-    const vx = Phaser.Math.Between(-160, 160);
-    ball.setPosition(GAME_WIDTH / 2, GAME_HEIGHT / 2);
-    ball.ghostFor = { p1: false, p2: false };
-    ball.previousY = GAME_HEIGHT / 2;
-    ball.setAlpha(1);
-    ball.body.setVelocity(vx, vy);
-  }
-}
-
-function canBallCollideWithPaddle(ball, playerKey) {
-  return ball.active && !ball.ghostFor?.[playerKey];
-}
-
-function updateBallTrails(scene, time) {
-  if (time % 3 > 1) {
-    return;
-  }
-
-  for (const ball of scene.playfield.balls) {
-    const trail = scene.add.circle(ball.x, ball.y, 4, ball.glowColor, 0.2);
-    scene.playfield.ballTrails.add(trail);
-
-    scene.tweens.add({
-      targets: trail,
-      alpha: 0,
-      scaleX: 0.2,
-      scaleY: 0.2,
-      duration: 250,
-      onComplete: () => trail.destroy(),
-    });
-  }
-}
-
-function handleBallPaddleCollision(scene, ball, paddle, playerKey) {
-  ball.lastTouchedBy = playerKey;
-  const ballColor = playerKey === 'p1' ? COLORS.p1 : COLORS.p2;
-  ball.setFillStyle(ballColor);
-  ball.glowColor = ballColor;
-
-  const offset = (ball.x - paddle.x) / (paddle.width / 2);
-  const currentSpeed = Math.min(ball.body.velocity.length() + 8, 330);
-  const horizontalVelocity = Phaser.Math.Clamp(offset * 220, -220, 220);
-  const verticalDirection = paddle === scene.playfield.p1Paddle ? 1 : -1;
-  const verticalVelocity = Math.max(120, Math.sqrt(currentSpeed * currentSpeed - horizontalVelocity * horizontalVelocity));
-
-  ball.body.setVelocity(horizontalVelocity, verticalVelocity * verticalDirection);
-}
-
-function handleBallBrickCollision(scene, ball, brick) {
-  if (!brick.active) {
-    return;
-  }
-
-  const brickX = brick.x;
-  const brickY = brick.y;
-  const brickHalfWidth = brick.width / 2;
-  const brickHalfHeight = brick.height / 2;
-  const deltaX = ball.x - brickX;
-  const deltaY = ball.y - brickY;
-  const normalizedX = Math.abs(deltaX) / Math.max(brickHalfWidth, 1);
-  const normalizedY = Math.abs(deltaY) / Math.max(brickHalfHeight, 1);
-  const speedX = Math.abs(ball.body.velocity.x);
-  const speedY = Math.abs(ball.body.velocity.y);
-
-  if (normalizedX > normalizedY) {
-    ball.body.setVelocityX((deltaX >= 0 ? 1 : -1) * Math.max(speedX, 150));
-    ball.setX(
-      brickX +
-        (deltaX >= 0 ? 1 : -1) * (brickHalfWidth + ball.width / 2 + 1),
-    );
-  } else {
-    ball.body.setVelocityY((deltaY >= 0 ? 1 : -1) * Math.max(speedY, 150));
-    ball.setY(
-      brickY +
-        (deltaY >= 0 ? 1 : -1) * (brickHalfHeight + ball.height / 2 + 1),
-    );
-  }
-
-  if (typeof ball.body.updateFromGameObject === 'function') {
-    ball.body.updateFromGameObject();
-  }
-
-  if (brick.body) {
-    brick.body.enable = false;
-  }
-  scene.playfield.bricks.remove(brick);
-  brick.destroy();
-  scene.state.remainingBricks -= 1;
-
-  if (ball.lastTouchedBy === 'p1') {
-    scene.state.scores.p1 += 1;
-  } else if (ball.lastTouchedBy === 'p2') {
-    scene.state.scores.p2 += 1;
-  }
-
-  spawnBrickBurst(scene, brick.x, brick.y, brick.fillColor);
-  playSound(scene, 'brick');
-  refreshHud(scene);
-  maybeFinishMatch(scene);
-}
-
-function startAmbientMusic(scene) {
-  if (scene.state.musicStarted) {
-    return;
-  }
-  scene.state.musicStarted = true;
-
-  try {
-    const ctx = scene.sound.context;
-    if (!ctx) {
-      return;
-    }
-
-    // Master output
-    const out = ctx.createGain();
-    out.gain.value = 0.18;
-    out.connect(ctx.destination);
-
-    // Feedback delay for space/depth
-    const dly  = ctx.createDelay(2);
-    const dlFb = ctx.createGain();
-    dly.delayTime.value = 0.48;
-    dlFb.gain.value = 0.28;
-    dly.connect(dlFb);
-    dlFb.connect(dly);
-    dlFb.connect(out);
-
-    // Pad — Am7 chord (A2 C3 E3 G3) through chorused detuned oscs + LP filter
-    const padFilt = ctx.createBiquadFilter();
-    padFilt.type = 'lowpass';
-    padFilt.frequency.value = 800;
-    padFilt.Q.value = 1.4;
-    padFilt.connect(out);
-    padFilt.connect(dly);
-
-    // Very slow LFO sweeps the filter cutoff for movement
-    const lfo  = ctx.createOscillator();
-    const lfoG = ctx.createGain();
-    lfo.frequency.value = 0.055;
-    lfoG.gain.value = 430;
-    lfo.connect(lfoG);
-    lfoG.connect(padFilt.frequency);
-    lfo.start();
-
-    [
-      [110, 0, 'sawtooth'], [110, 11, 'sawtooth'], [110, -11, 'sawtooth'],
-      [130.81, 0, 'triangle'], [164.81, 5, 'triangle'], [196, -4, 'triangle'],
-    ].forEach(([f, d, type]) => {
-      const osc = ctx.createOscillator();
-      const g   = ctx.createGain();
-      osc.type = type;
-      osc.frequency.value = f;
-      osc.detune.value = d;
-      g.gain.value = 0.028;
-      osc.connect(g);
-      g.connect(padFilt);
-      osc.start();
-    });
-
-    // Arp — A minor pentatonic, up and back down
-    const ARP  = [220, 261.63, 293.66, 329.63, 392, 440, 392, 329.63, 293.66, 261.63];
-    const STEP = 0.43;
-    const ALEN = ARP.length * STEP;
-
-    function scheduleArp(t0) {
-      ARP.forEach((freq, i) => {
-        const t   = t0 + i * STEP;
-        const osc = ctx.createOscillator();
-        const g   = ctx.createGain();
-        osc.type = 'triangle';
-        osc.frequency.value = freq;
-        osc.connect(g);
-        g.connect(out);
-        g.connect(dly);
-        g.gain.setValueAtTime(0.001, t);
-        g.gain.linearRampToValueAtTime(0.048, t + 0.018);
-        g.gain.exponentialRampToValueAtTime(0.0001, t + STEP * 0.65);
-        osc.start(t);
-        osc.stop(t + STEP * 0.72);
-      });
-      scene.time.delayedCall((ALEN - 0.06) * 1000, () => scheduleArp(t0 + ALEN));
-    }
-
-    // Sub-bass pulse on the beat (55 Hz sine, 120 bpm)
-    const BEAT = 1.0;
-    function scheduleBass(t) {
-      const osc = ctx.createOscillator();
-      const g   = ctx.createGain();
-      osc.type = 'sine';
-      osc.frequency.value = 55;
-      osc.connect(g);
-      g.connect(out);
-      g.gain.setValueAtTime(0.28, t);
-      g.gain.exponentialRampToValueAtTime(0.001, t + 0.5);
-      osc.start(t);
-      osc.stop(t + 0.55);
-      scene.time.delayedCall(BEAT * 1000, () => scheduleBass(t + BEAT));
-    }
-
-    // Short high-pitched digital tick — every half-beat, offset for syncopation
-    const TICK = 0.5;
-    function scheduleTick(t) {
-      const osc = ctx.createOscillator();
-      const g   = ctx.createGain();
-      osc.type = 'sine';
-      osc.frequency.value = 1320;
-      osc.connect(g);
-      g.connect(out);
-      g.gain.setValueAtTime(0.028, t);
-      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.02);
-      osc.start(t);
-      osc.stop(t + 0.025);
-      scene.time.delayedCall(TICK * 1000, () => scheduleTick(t + TICK));
-    }
-
-    const t0 = ctx.currentTime + 0.3;
-    scheduleArp(t0);
-    scheduleBass(t0);
-    scheduleTick(t0 + 0.25);
-  } catch (_) {}
-}
-
-function playSound(scene, type) {
-  try {
-    const ctx = scene.sound && scene.sound.context ? scene.sound.context : new AudioContext();
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-
-    const now = ctx.currentTime;
-    if (type === 'brick') {
-      osc.type = 'square';
-      osc.frequency.setValueAtTime(880, now);
-      osc.frequency.exponentialRampToValueAtTime(440, now + 0.08);
-      gain.gain.setValueAtTime(0.18, now);
-      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.1);
-      osc.start(now);
-      osc.stop(now + 0.1);
-    } else if (type === 'penalty') {
-      osc.type = 'sawtooth';
-      osc.frequency.setValueAtTime(300, now);
-      osc.frequency.exponentialRampToValueAtTime(80, now + 0.35);
-      gain.gain.setValueAtTime(0.28, now);
-      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.38);
-      osc.start(now);
-      osc.stop(now + 0.38);
-    } else if (type === 'click') {
-      osc.type = 'square';
-      osc.frequency.setValueAtTime(1200, now);
-      osc.frequency.exponentialRampToValueAtTime(600, now + 0.04);
-      gain.gain.setValueAtTime(0.08, now);
-      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.05);
-      osc.start(now);
-      osc.stop(now + 0.05);
-    } else if (type === 'dash') {
-      osc.type = 'sawtooth';
-      osc.frequency.setValueAtTime(180, now);
-      osc.frequency.exponentialRampToValueAtTime(900, now + 0.12);
-      gain.gain.setValueAtTime(0.22, now);
-      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.18);
-      osc.start(now);
-      osc.stop(now + 0.18);
-    } else if (type === 'select') {
-      osc.type = 'square';
-      osc.frequency.setValueAtTime(700, now);
-      osc.frequency.exponentialRampToValueAtTime(1400, now + 0.08);
-      gain.gain.setValueAtTime(0.12, now);
-      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.1);
-      osc.start(now);
-      osc.stop(now + 0.1);
-    }
-  } catch (_) {}
-}
-
-function spawnBrickBurst(scene, x, y, color) {
-  for (let index = 0; index < 6; index += 1) {
-    const particle = scene.add.rectangle(x, y, 4, 4, color, 1);
-    const angle = Phaser.Math.FloatBetween(0, Math.PI * 2);
-    const distance = Phaser.Math.Between(16, 42);
-
-    scene.tweens.add({
-      targets: particle,
-      x: x + Math.cos(angle) * distance,
-      y: y + Math.sin(angle) * distance,
-      alpha: 0,
-      angle: Phaser.Math.Between(-90, 90),
-      duration: Phaser.Math.Between(180, 320),
-      onComplete: () => particle.destroy(),
-    });
-  }
-}
-
-function refreshHud(scene) {
-  scene.hud.p1Score.setText(`P1 ${String(scene.state.scores.p1).padStart(2, '0')}`);
-  scene.hud.p2Score.setText(`P2 ${String(scene.state.scores.p2).padStart(2, '0')}`);
-  scene.hud.remaining.setText(`BRICKS ${String(scene.state.remainingBricks).padStart(3, '0')}`);
-}
-
-function animatePenaltyCounter(scene, playerKey) {
-  const text =
-    playerKey === 'p1' ? scene.hud.p1Score : scene.hud.p2Score;
-  const baseColor =
-    playerKey === 'p1'
-      ? scene.hud.scoreColors.p1
-      : scene.hud.scoreColors.p2;
-
-  scene.tweens.killTweensOf(text);
-  text.setColor(scene.hud.scoreColors.penalty);
-  text.setScale(1);
-  text.setAngle(0);
-
-  scene.tweens.add({
-    targets: text,
-    scaleX: 1.12,
-    scaleY: 1.12,
-    angle: playerKey === 'p1' ? -6 : 6,
-    duration: 90,
-    yoyo: true,
-    repeat: 1,
-    onComplete: () => {
-      text.setColor(baseColor);
-      text.setScale(1);
-      text.setAngle(0);
-    },
-  });
-}
-
-function maybeFinishMatch(scene) {
-  const { p1, p2 } = scene.state.scores;
-  const remaining = scene.state.remainingBricks;
-  const leaderScore = Math.max(p1, p2);
-  const trailingScore = Math.min(p1, p2);
-
-  if (remaining === 0 || leaderScore >= trailingScore + remaining) {
-    finishMatch(scene);
-  }
-}
-
-function finishMatch(scene) {
-  if (scene.state.phase !== 'playing') {
-    return;
-  }
-
-  scene.state.phase = 'gameover';
-  scene.physics.pause();
-  scene.hud.status.setText('');
-
-  const p1 = scene.state.scores.p1;
-  const p2 = scene.state.scores.p2;
-  const isTie = p1 === p2;
-
-  scene.state.winner = isTie ? 'draw' : p1 > p2 ? 'p1' : 'p2';
-  scene.state.winnerLabel =
-    scene.state.winner === 'p1'
-      ? 'PLAYER 1'
-      : scene.state.winner === 'p2'
-        ? 'PLAYER 2'
-        : 'DRAW';
-
-  scene.endGame.container.setVisible(true);
-  scene.endGame.summary.setText(
-    isTie
-      ? `${p1}  :  ${p2}`
-      : `${scene.state.winnerLabel}  ${Math.max(p1, p2)}  :  ${Math.min(p1, p2)}`,
-  );
-  scene.endGame.nameLabel.setText(
-    isTie ? 'DRAW TAG' : 'INITIALS',
-  );
-  scene.endGame.saveStatus.setText(scene.state.saveStatus);
-
-  scene.state.nameEntry.row = 0;
-  scene.state.nameEntry.col = 0;
-  scene.state.nameEntry.moveCooldownUntil = 0;
-  scene.state.nameEntry.confirmCooldownUntil = 0;
-  scene.state.nameEntry.lastMoveVector = { x: 0, y: 0 };
-  refreshNameEntry(scene);
-  updateLetterGridHighlight(scene);
-}
-
-function handleNameEntry(scene, time) {
-  const axisX = getHorizontalMenuAxis(scene.controls);
-  const axisY = getVerticalMenuAxis(scene.controls);
-  const entry = scene.state.nameEntry;
-
-  if (
-    time >= entry.moveCooldownUntil &&
-    (axisX !== 0 || axisY !== 0) &&
-    (entry.lastMoveVector.x !== axisX || entry.lastMoveVector.y !== axisY)
-  ) {
-    moveLetterSelection(scene, axisX, axisY);
-    entry.moveCooldownUntil = time + 160;
-    playSound(scene, 'click');
-  }
-
-  if (axisX === 0 && axisY === 0) {
-    entry.lastMoveVector = { x: 0, y: 0 };
-  } else {
-    entry.lastMoveVector = { x: axisX, y: axisY };
-  }
-
-  if (
-    time >= entry.confirmCooldownUntil &&
-    consumeAnyPressedControl(scene, ['P1_1', 'P2_1', 'P1_2', 'P2_2', 'START1', 'START2'])
-  ) {
-    entry.confirmCooldownUntil = time + 180;
-    playSound(scene, 'select');
-    activateCurrentLetter(scene);
-  }
-}
-
-function getHorizontalMenuAxis(controls) {
-  let axis = 0;
-  if (controls.held.P1_L || controls.held.P2_L) {
-    axis -= 1;
-  }
-  if (controls.held.P1_R || controls.held.P2_R) {
-    axis += 1;
-  }
-  return Phaser.Math.Clamp(axis, -1, 1);
-}
-
-function getVerticalMenuAxis(controls) {
-  let axis = 0;
-  if (controls.held.P1_U || controls.held.P2_U) {
-    axis -= 1;
-  }
-  if (controls.held.P1_D || controls.held.P2_D) {
-    axis += 1;
-  }
-  return Phaser.Math.Clamp(axis, -1, 1);
-}
-
-function normalizeIncomingKey(key) {
-  if (typeof key !== 'string' || key.length === 0) {
-    return '';
-  }
-
-  if (key === ' ') {
-    return 'space';
-  }
-
-  return key.toLowerCase();
-}
-
-function isControlHeld(scene, controlCode) {
-  return scene.controls.held[controlCode] === true;
-}
-
-function consumeAnyPressedControl(scene, controlCodes) {
-  for (const controlCode of controlCodes) {
-    if (scene.controls.pressed[controlCode]) {
-      scene.controls.pressed[controlCode] = false;
-      return true;
-    }
-  }
-
-  return false;
-}
-
-function moveLetterSelection(scene, axisX, axisY) {
-  const entry = scene.state.nameEntry;
-
-  if (axisY !== 0) {
-    entry.row = Phaser.Math.Wrap(entry.row + axisY, 0, LETTER_GRID.length);
-    entry.col = Math.min(entry.col, LETTER_GRID[entry.row].length - 1);
-  }
-
-  if (axisX !== 0) {
-    entry.col = Phaser.Math.Wrap(entry.col + axisX, 0, LETTER_GRID[entry.row].length);
-  }
-
-  updateLetterGridHighlight(scene);
-}
-
-function updateLetterGridHighlight(scene) {
-  const entry = scene.state.nameEntry;
-  for (const item of scene.endGame.gridLabels) {
-    const active = item.row === entry.row && item.col === entry.col;
-    item.cell.setFillStyle(active ? COLORS.accent : COLORS.cell, active ? 1 : 0.95);
-    item.cell.setStrokeStyle(2, active ? COLORS.white : COLORS.frame, active ? 1 : 0.8);
-    item.label.setColor(active ? '#04110b' : '#f7ffd8');
-  }
-}
-
-function activateCurrentLetter(scene) {
-  const entry = scene.state.nameEntry;
-  const selectedValue = LETTER_GRID[entry.row][entry.col];
-
-  if (selectedValue === 'DEL') {
-    entry.letters.pop();
-    refreshNameEntry(scene);
-    return;
-  }
-
-  if (selectedValue === 'END') {
-    if (entry.letters.length === 0) {
-      scene.endGame.saveStatus.setText('Pick at least one character before saving.');
-      return;
-    }
-
-    submitHighScore(scene);
-    return;
-  }
-
-  if (entry.letters.length >= WINNING_NAME_LENGTH) {
-    entry.letters.shift();
-  }
-
-  entry.letters.push(selectedValue);
-  refreshNameEntry(scene);
-}
-
-function refreshNameEntry(scene) {
-  const letters = scene.state.nameEntry.letters.slice();
-  while (letters.length < WINNING_NAME_LENGTH) {
-    letters.push('_');
-  }
-  scene.endGame.nameValue.setText(letters.join(' '));
-}
-
-function submitHighScore(scene) {
-  if (scene.state.phase !== 'gameover') {
-    return;
-  }
-
-  const initials = scene.state.nameEntry.letters.join('').slice(0, WINNING_NAME_LENGTH) || '???';
-  const winningScore =
-    scene.state.winner === 'p1'
-      ? scene.state.scores.p1
-      : scene.state.winner === 'p2'
-        ? scene.state.scores.p2
-        : scene.state.scores.p1;
-
-  const entry = {
-    name: initials,
-    winner: scene.state.winnerLabel,
-    score: winningScore,
-    detail: `${scene.state.scores.p1}-${scene.state.scores.p2}`,
-    savedAt: new Date().toISOString().slice(0, 10),
-  };
-
-  scene.state.saveStatus = `Saved ${initials}! Press START to play again.`;
-  scene.endGame.saveStatus.setText(scene.state.saveStatus);
-  scene.state.phase = 'saved';
-
-  persistHighScore(entry)
-    .then((nextScores) => {
-      scene.state.highScores = nextScores;
-      refreshLeaderboard(scene);
-    })
-    .catch(() => {
-      scene.state.saveStatus = 'Could not save the score, but the game result stands.';
-      if (scene.state.phase === 'saved') {
-        scene.endGame.saveStatus.setText(scene.state.saveStatus);
-      }
-    });
-}
-
-function refreshLeaderboard(scene) {
-  const lines = scene.state.highScores.length
-    ? scene.state.highScores.map((entry, index) => {
-        const rank = String(index + 1).padStart(2, '0');
-        const score = String(entry.score).padStart(2, '0');
-        return `${rank} ${entry.name.padEnd(3, ' ')} ${score} ${entry.winner}`;
-      })
-    : ['NO SAVED SCORES YET'];
-
-  scene.endGame.leaderboard.setText(lines.join('\n'));
-}
-
-async function persistHighScore(entry) {
-  const existing = await loadHighScores();
-  const nextScores = existing
-    .concat(entry)
-    .sort((left, right) => {
-      if (right.score !== left.score) {
-        return right.score - left.score;
-      }
-      return left.savedAt < right.savedAt ? 1 : -1;
-    })
-    .slice(0, MAX_HIGH_SCORES);
-
-  await storageSet(STORAGE_KEY, nextScores);
-  return nextScores;
-}
-
-async function loadHighScores() {
-  const result = await storageGet(STORAGE_KEY);
-  if (!result.found || !Array.isArray(result.value)) {
-    return [];
-  }
-
-  return result.value.filter(isHighScoreEntry).slice(0, MAX_HIGH_SCORES);
-}
-
-function isHighScoreEntry(value) {
-  return (
-    value &&
-    typeof value === 'object' &&
-    typeof value.name === 'string' &&
-    typeof value.winner === 'string' &&
-    typeof value.score === 'number' &&
-    typeof value.detail === 'string' &&
-    typeof value.savedAt === 'string'
-  );
-}
-
-function getStorage() {
-  if (window.platanusArcadeStorage) {
-    return window.platanusArcadeStorage;
-  }
-
-  return {
-    async get(key) {
-      try {
-        const raw = window.localStorage.getItem(key);
-        return raw === null
-          ? { found: false, value: null }
-          : { found: true, value: JSON.parse(raw) };
-      } catch {
-        return { found: false, value: null };
-      }
-    },
-    async set(key, value) {
-      window.localStorage.setItem(key, JSON.stringify(value));
-    },
-};
-}
-
-async function storageGet(key) {
-  return getStorage().get(key);
-}
-
-async function storageSet(key, value) {
-  return getStorage().set(key, value);
-}
+function pauseMatch(scene) { scene.state.phase = 'paused'; scene.physics.pause(); scene.pauseScreen.container.setVisible(true); }
+function resumeMatch(scene) { scene.pauseScreen.container.setVisible(false); scene.physics.resume(); scene.state.phase = 'playing'; }
