@@ -13,9 +13,10 @@ const PLAY = { minX: 30, maxX: 770, minY: 64, maxY: 560 };
 // All balance numbers live here for cheap iteration.
 const TUNING = {
   player: { speed: 300, radius: 16, maxHp: 100, lives: 3, invuln: 1500, regenPerSec: 0 }, // 0 = no passive regen by default; raised by the HP REGEN upgrade.
-  enemyCapHard: 80,
-  spawn: { baseInterval: 1100, minInterval: 240 },
-  intensity: { rampPerSec: 0.012, hpScalePerUnit: 0.18, speedScalePerUnit: 0.05 },
+  enemyCapHard: 24,
+  maxDucks: 6,
+  spawn: { baseInterval: 1700, minInterval: 480, soloMul: 1.6 },
+  intensity: { rampPerSec: 0.007, hpScalePerUnit: 0.18, speedScalePerUnit: 0.03 },
   xp: { base: 6, growth: 1.35 }, // xp needed for level n = base * growth^(n-1), rounded
   scoreTimeBonusPerSec: 2,
   abilities: {
@@ -46,16 +47,16 @@ const COLORS = {
 };
 
 const ENEMY_TYPES = {
-  plane:      { tex: 'plane',      hp: 6,  speed: 150, dmgRes: 1,   weight: 10, minI: 0,   score: 10,  xp: 2, radius: 9,  attack: 'none',     contact: 8,  bob: 0 },
-  helicopter: { tex: 'helicopter', hp: 10, speed: 90,  dmgRes: 1,   weight: 9,  minI: 0,   score: 12,  xp: 2, radius: 10, attack: 'straight', contact: 8,  bob: 28, fireMs: 1600, bDmg: 6 },
-  duck:       { tex: 'duck',       hp: 16, speed: 110, dmgRes: 1,   weight: 7,  minI: 0.3, score: 18,  xp: 3, radius: 11, attack: 'duck',     contact: 10, bob: 18 },
-  fighter:    { tex: 'fighter',    hp: 14, speed: 200, dmgRes: 1,   weight: 7,  minI: 0.8, score: 20,  xp: 3, radius: 9,  attack: 'aimed',    contact: 12, bob: 0,  fireMs: 1500, bDmg: 12 },
-  warplane:   { tex: 'warplane',   hp: 26, speed: 120, dmgRes: 1,   weight: 6,  minI: 1.2, score: 26,  xp: 4, radius: 12, attack: 'straight', contact: 14, bob: 0,  fireMs: 1100, bDmg: 12 },
-  stealth:    { tex: 'stealth',    hp: 12, speed: 240, dmgRes: 1,   weight: 5,  minI: 2.0, score: 30,  xp: 5, radius: 9,  attack: 'aimed',    contact: 16, bob: 0,  fireMs: 1700, bDmg: 16, alpha: 0.35 },
-  witch:      { tex: 'witch',      hp: 34, speed: 110, dmgRes: 0.6, weight: 5,  minI: 1.6, score: 34,  xp: 5, radius: 12, attack: 'aimed',    contact: 12, bob: 40, fireMs: 1400, bDmg: 12, bColor: 0x9fe0ff },
-  dragon:     { tex: 'dragon',     hp: 40, speed: 80,  dmgRes: 0.7, weight: 4,  minI: 2.4, score: 44,  xp: 7, radius: 14, attack: 'dragon',   contact: 14, bob: 24 },
-  dolphin:    { tex: 'dolphin',    hp: 18, speed: 150, dmgRes: 1,   weight: 4,  minI: 1.8, score: 28,  xp: 4, radius: 11, attack: 'dolphin',  contact: 10, bob: 60, fireMs: 1600 },
-  hero:       { tex: 'hero',       hp: 60, speed: 70,  dmgRes: 0.1, weight: 3,  minI: 3.0, score: 80,  xp: 12, radius: 12, attack: 'hero',    contact: 20, bob: 0,  fireMs: 2600 },
+  plane:      { tex: 'plane',      hp: 6,  speed: 150, dmgRes: 1,   weight: 10, minI: 0,   score: 10,  xp: 2, radius: 20, attack: 'none',     contact: 8,  bob: 0 },
+  helicopter: { tex: 'helicopter', hp: 10, speed: 90,  dmgRes: 1,   weight: 9,  minI: 0,   score: 12,  xp: 2, radius: 20, attack: 'straight', contact: 8,  bob: 28, fireMs: 1600, bDmg: 6 },
+  duck:       { tex: 'duck',       hp: 16, speed: 110, dmgRes: 1,   weight: 7,  minI: 0.3, score: 18,  xp: 3, radius: 20, attack: 'duck',     contact: 10, bob: 18 },
+  fighter:    { tex: 'fighter',    hp: 14, speed: 160, dmgRes: 1,   weight: 7,  minI: 0.8, score: 20,  xp: 3, radius: 20, attack: 'aimed',    contact: 12, bob: 0,  fireMs: 1500, bDmg: 12 },
+  warplane:   { tex: 'warplane',   hp: 26, speed: 120, dmgRes: 1,   weight: 6,  minI: 1.2, score: 26,  xp: 4, radius: 21, attack: 'straight', contact: 14, bob: 0,  fireMs: 1100, bDmg: 12 },
+  stealth:    { tex: 'stealth',    hp: 12, speed: 190, dmgRes: 1,   weight: 5,  minI: 2.0, score: 30,  xp: 5, radius: 20, attack: 'aimed',    contact: 16, bob: 0,  fireMs: 1700, bDmg: 16, alpha: 0.35 },
+  witch:      { tex: 'witch',      hp: 34, speed: 110, dmgRes: 0.6, weight: 5,  minI: 1.6, score: 34,  xp: 5, radius: 20, attack: 'aimed',    contact: 12, bob: 40, fireMs: 1400, bDmg: 12, bColor: 0x9fe0ff },
+  dragon:     { tex: 'dragon',     hp: 40, speed: 80,  dmgRes: 0.7, weight: 4,  minI: 2.4, score: 44,  xp: 7, radius: 22, attack: 'dragon',   contact: 14, bob: 24 },
+  dolphin:    { tex: 'dolphin',    hp: 18, speed: 150, dmgRes: 1,   weight: 4,  minI: 1.8, score: 28,  xp: 4, radius: 20, attack: 'dolphin',  contact: 10, bob: 60, fireMs: 1600 },
+  hero:       { tex: 'hero',       hp: 60, speed: 70,  dmgRes: 0.1, weight: 3,  minI: 3.0, score: 80,  xp: 12, radius: 20, attack: 'hero',    contact: 20, bob: 0,  fireMs: 2600 },
 };
 
 const UPGRADES = [
@@ -71,7 +72,7 @@ const UPGRADES = [
   { id: 'bomb_pwr', label: 'BOMB +AREA', desc: 'Bigger blast', applies: (p) => p.abilities.bomb.unlocked && p.abilities.bomb.level < 6, apply: (p) => { p.abilities.bomb.level += 1; } },
   { id: 'cloak_dur', label: 'CLOAK +TIME', desc: 'Longer invisibility', applies: (p) => p.abilities.cloak.unlocked && p.abilities.cloak.level < 6, apply: (p) => { p.abilities.cloak.level += 1; } },
   { id: 'max_hp', label: 'MAX HP +25', desc: 'Tougher hull (heals)', applies: (p) => p.maxHp < 250, apply: (p) => { p.maxHp += 25; p.hp = Math.min(p.maxHp, p.hp + 25); } },
-  { id: 'regen', label: 'HP REGEN +', desc: 'Slow self-repair', applies: (p) => p.regenPerSec < 12, apply: (p) => { p.regenPerSec += 3; } },
+  { id: 'regen', label: 'HP REGEN +', desc: 'Slow self-repair', applies: (p) => p.regenPerSec < 5, apply: (p) => { p.regenPerSec += 1; } },
   { id: 'speed', label: 'SPEED +', desc: 'Faster movement', applies: (p) => p.speedMul < 1.8, apply: (p) => { p.speedMul += 0.12; } },
 ];
 
@@ -274,7 +275,7 @@ function getHorizontalMenuAxis(controls) {
 }
 
 // ---- World setup (called on startMatch) ----
-function createWorld(scene) {
+function createWorld(scene, numPlayers) {
   if (scene.world) destroyWorld(scene);
   scene.world = {
     players: [],
@@ -287,8 +288,9 @@ function createWorld(scene) {
     spawnTimer: 0,
     levelQueue: [],
   };
-  scene.world.players.push(createPlayer(scene, 'p1', 'P1', 'ovniP1', COLORS.p1, 140, 200));
-  scene.world.players.push(createPlayer(scene, 'p2', 'P2', 'ovniP2', COLORS.p2, 140, 380));
+  const solo = numPlayers === 1;
+  scene.world.players.push(createPlayer(scene, 'p1', 'P1', 'ovniP1', COLORS.p1, 140, solo ? 300 : 200));
+  if (!solo) scene.world.players.push(createPlayer(scene, 'p2', 'P2', 'ovniP2', COLORS.p2, 140, 380));
   registerCollisions(scene);
 }
 
@@ -381,7 +383,7 @@ function loseLife(scene, p, time) {
     maybeGameOver(scene);
   } else {
     p.hp = p.maxHp;
-    p.sprite.setPosition(140, p.key === 'p1' ? 200 : 380);
+    p.sprite.setPosition(p.spawnX, p.spawnY);
     p.invulnUntil = time + TUNING.player.invuln;
   }
 }
@@ -612,6 +614,7 @@ function createPlayer(scene, key, label, texture, color, x, y) {
   sprite.body.setCollideWorldBounds(false);
   const player = {
     key, label, color, sprite,
+    spawnX: x, spawnY: y,
     hp: TUNING.player.maxHp, maxHp: TUNING.player.maxHp,
     lives: TUNING.player.lives,
     alive: true, spectator: false,
@@ -842,12 +845,20 @@ function activateCloak(scene, p, time) {
 function isCloaked(p, time) { return time < (p.cloakUntil || 0); }
 
 // ---- Enemies ----
+function countDucks(scene) {
+  let n = 0;
+  scene.world.enemies.children.iterate((e) => { if (e && e.active && e.etype === 'duck') n += 1; });
+  return n;
+}
+
 function pickEnemyType(scene) {
   const I = scene.state.intensity;
+  const duckCapped = countDucks(scene) >= TUNING.maxDucks;
   const pool = [];
   let total = 0;
   for (const [name, def] of Object.entries(ENEMY_TYPES)) {
     if (I < def.minI) continue;
+    if (name === 'duck' && duckCapped) continue; // don't flood the screen with ducks
     const w = def.weight * (1 + Math.max(0, I - def.minI) * 0.15); // tougher enemies grow more common as intensity rises
     total += w;
     pool.push({ name, acc: total });
@@ -886,7 +897,8 @@ function updateSpawner(scene, time, delta) {
   const w = scene.world;
   w.spawnTimer -= delta;
   const I = scene.state.intensity;
-  const interval = Math.max(TUNING.spawn.minInterval, TUNING.spawn.baseInterval - I * 120);
+  const pMul = scene.state.numPlayers === 1 ? TUNING.spawn.soloMul : 1;
+  const interval = Math.max(TUNING.spawn.minInterval, TUNING.spawn.baseInterval - I * 120) * pMul;
   const count = w.enemies.countActive(true);
   if (w.spawnTimer <= 0 && count < TUNING.enemyCapHard) {
     w.spawnTimer = interval;
@@ -942,7 +954,7 @@ function layEgg(scene, x, y) {
   egg.body.setAllowGravity(false);
   egg.body.setVelocity(0, 0);
   egg.hp = 3;
-  egg.hatchAt = scene.time.now + 4500;
+  egg.hatchAt = scene.time.now + 7000;
   return egg;
 }
 
@@ -950,12 +962,12 @@ function updateEggs(scene, time) {
   scene.world.eggs.children.iterate((egg) => {
     if (!egg || !egg.active) return;
     if (time >= egg.hatchAt) {
-      if (scene.world.enemies.countActive(true) < TUNING.enemyCapHard) {
+      if (scene.world.enemies.countActive(true) < TUNING.enemyCapHard && countDucks(scene) < TUNING.maxDucks) {
         spawnEnemy(scene, 'duck', egg.x, egg.y);
         recycle(egg);
         playSound(scene, 'hatch');
       } else {
-        egg.hatchAt = time + 500;
+        egg.hatchAt = time + 500; // wait for a free duck slot
       }
     }
   });
@@ -1015,11 +1027,11 @@ function updateEnemyAI(scene, e, time) {
   } else if (def.attack === 'duck') {
     if (!e.ai.laid) e.ai.laid = 0;
     if (e.ai.laid < 3) {
-      if (!e.ai.nextEgg) e.ai.nextEgg = time + 700;
+      if (!e.ai.nextEgg) e.ai.nextEgg = time + 3000;
       if (time >= e.ai.nextEgg) {
         layEgg(scene, Phaser.Math.Between(PLAY.minX + 40, PLAY.maxX), Phaser.Math.Between(PLAY.minY + 20, PLAY.maxY));
         e.ai.laid += 1;
-        e.ai.nextEgg = time + 900;
+        e.ai.nextEgg = time + 3000;
       }
     } else if (!e.ai.kamikaze) {
       e.ai.kamikaze = true;
@@ -1082,7 +1094,7 @@ function createHud(scene) {
     return { hpFill, hpBg, lives, xpFill, ab, x, originX };
   };
   scene.hud.sides.p1 = makeSide(scene.world.players[0], 12, 0);
-  scene.hud.sides.p2 = makeSide(scene.world.players[1], GAME_WIDTH - 12, 1);
+  if (scene.world.players[1]) scene.hud.sides.p2 = makeSide(scene.world.players[1], GAME_WIDTH - 12, 1);
   scene.hud.center = scene.add.text(GAME_WIDTH / 2, 6, '', { fontFamily: 'monospace', fontSize: '14px', color: '#7cf2ff', fontStyle: 'bold', align: 'center' }).setOrigin(0.5, 0);
   c.add(scene.hud.center);
 }
@@ -1120,86 +1132,85 @@ function buildTextures(scene) {
     g.destroy();
   };
 
-  // 1x1 white for tinted particles/bars
   mk('px', 2, 2, (g) => g.fillStyle(0xffffff, 1).fillRect(0, 0, 2, 2));
 
-  // UFO (saucer): dome + disc. Two color variants.
   const saucer = (g, body) => {
-    g.fillStyle(0x223, 0); // no-op to keep signature consistent
-    g.fillStyle(body, 1).fillEllipse(18, 20, 34, 14);     // disc
-    g.fillStyle(0xcfe8ff, 1).fillEllipse(18, 13, 18, 14); // dome
+    g.fillStyle(body, 1).fillEllipse(18, 20, 34, 14);
+    g.fillStyle(0xcfe8ff, 1).fillEllipse(18, 13, 18, 14);
     g.fillStyle(0x9fd0ff, 0.6).fillEllipse(18, 12, 10, 8);
-    g.fillStyle(0xffffff, 1).fillCircle(8, 22, 2).fillCircle(18, 24, 2).fillCircle(28, 22, 2); // lights
+    g.fillStyle(0xffffff, 1).fillCircle(8, 22, 2).fillCircle(18, 24, 2).fillCircle(28, 22, 2);
   };
   mk('ovniP1', 36, 30, (g) => saucer(g, COLORS.p1));
   mk('ovniP2', 36, 30, (g) => saucer(g, COLORS.p2));
 
-  // Player bullet (right-going energy bolt)
   mk('pBullet', 14, 6, (g) => { g.fillStyle(0xffffff, 1).fillRect(0, 1, 14, 4); g.fillStyle(COLORS.accent, 1).fillRect(0, 0, 10, 6); });
-  // Enemy bullet (red orb)
   mk('eBullet', 8, 8, (g) => { g.fillStyle(0xff8a4a, 1).fillCircle(4, 4, 4); g.fillStyle(0xfff0c0, 1).fillCircle(4, 4, 2); });
-  // Egg
-  mk('egg', 16, 20, (g) => { g.fillStyle(COLORS.egg, 1).fillEllipse(8, 11, 14, 18); g.fillStyle(0xd8c79a, 1).fillEllipse(8, 14, 8, 6); });
-  // Spark particle
+  mk('egg', 26, 32, (g) => { g.fillStyle(COLORS.egg, 1).fillEllipse(13, 17, 22, 28); g.fillStyle(0xd8c79a, 1).fillEllipse(13, 22, 12, 9); });
   mk('spark', 6, 6, (g) => g.fillStyle(0xffffff, 1).fillRect(0, 0, 6, 6));
 
-  // Enemies — all face LEFT (they move left). Keep ~30-44px.
-  mk('helicopter', 44, 22, (g) => {
-    g.fillStyle(0x6f7a4a, 1).fillRoundedRect(6, 8, 26, 10, 4);   // body
-    g.fillStyle(0x9fb06a, 1).fillRect(2, 12, 6, 4);              // tail
-    g.fillStyle(0xcfe8ff, 0.8).fillRect(8, 9, 8, 6);            // cockpit
-    g.fillStyle(0xdddddd, 1).fillRect(2, 4, 38, 2);            // rotor
+  // Enemies — all face LEFT, now ~40-52px so the ~40px circular hitbox matches the art.
+  mk('plane', 44, 40, (g) => {
+    g.fillStyle(0xc8ccd6, 1).fillTriangle(2, 20, 40, 10, 40, 30);
+    g.fillStyle(0x8a93c8, 1).fillTriangle(22, 20, 42, 2, 34, 20);
+    g.fillStyle(0x8a93c8, 1).fillTriangle(22, 20, 42, 38, 34, 20);
+    g.fillStyle(0xcfe8ff, 0.9).fillCircle(12, 20, 4);
   });
-  mk('plane', 40, 18, (g) => {
-    g.fillStyle(0xc8ccd6, 1).fillTriangle(0, 9, 34, 3, 34, 15); // fuselage pointing left
-    g.fillStyle(0x8a93c8, 1).fillTriangle(20, 9, 38, 0, 30, 9);
-    g.fillStyle(0x8a93c8, 1).fillTriangle(20, 9, 38, 18, 30, 9);
+  mk('helicopter', 48, 40, (g) => {
+    g.fillStyle(0x6f7a4a, 1).fillRoundedRect(8, 16, 30, 18, 7);
+    g.fillStyle(0x9fb06a, 1).fillRect(2, 22, 8, 6);
+    g.fillStyle(0xcfe8ff, 0.85).fillRect(12, 19, 12, 10);
+    g.fillStyle(0xdddddd, 1).fillRect(2, 8, 44, 3);
+    g.fillStyle(0x4a5232, 1).fillRect(20, 33, 14, 3);
   });
-  mk('duck', 30, 26, (g) => {
-    g.fillStyle(0xffe24d, 1).fillEllipse(16, 16, 22, 16);       // body
-    g.fillStyle(0xffe24d, 1).fillCircle(7, 9, 7);               // head
-    g.fillStyle(0xff8a3a, 1).fillTriangle(0, 9, 7, 6, 7, 12);   // beak (left)
-    g.fillStyle(0x222222, 1).fillCircle(6, 8, 1.5);             // eye
-    g.fillStyle(0xf0c83a, 1).fillTriangle(18, 10, 28, 4, 26, 14); // wing
+  mk('duck', 40, 40, (g) => {
+    g.fillStyle(0xffe24d, 1).fillEllipse(24, 25, 28, 22);          // body
+    g.fillStyle(0xf0c83a, 1).fillTriangle(26, 18, 39, 10, 37, 26); // wing
+    g.fillStyle(0xffe24d, 1).fillCircle(17, 14, 9);               // head
+    g.fillStyle(0xff8a3a, 1).fillTriangle(0, 15, 11, 10, 11, 20); // beak protruding left
+    g.fillStyle(0xe06a1a, 1).fillTriangle(0, 15, 9, 13, 9, 18);   // beak shading (lower bill)
+    g.fillStyle(0x222222, 1).fillCircle(16, 11, 2);              // eye
   });
-  mk('fighter', 42, 16, (g) => {
-    g.fillStyle(0x3a4a6a, 1).fillTriangle(0, 8, 40, 2, 40, 14);
-    g.fillStyle(0x6fa8ff, 1).fillTriangle(18, 8, 36, 1, 30, 8);
-    g.fillStyle(0x6fa8ff, 1).fillTriangle(18, 8, 36, 15, 30, 8);
-    g.fillStyle(0xcfe8ff, 0.8).fillCircle(8, 8, 2);
+  mk('fighter', 46, 40, (g) => {
+    g.fillStyle(0x3a4a6a, 1).fillTriangle(2, 20, 44, 10, 44, 30);
+    g.fillStyle(0x6fa8ff, 1).fillTriangle(24, 20, 42, 2, 34, 20);
+    g.fillStyle(0x6fa8ff, 1).fillTriangle(24, 20, 42, 38, 34, 20);
+    g.fillStyle(0xcfe8ff, 0.85).fillCircle(12, 20, 4);
   });
-  mk('warplane', 48, 22, (g) => {
-    g.fillStyle(0x5a5f3a, 1).fillTriangle(0, 11, 44, 4, 44, 18);
-    g.fillStyle(0x3f4a2e, 1).fillRect(20, 2, 14, 18);          // wings
-    g.fillStyle(0x222222, 1).fillRect(6, 9, 6, 4);
+  mk('warplane', 50, 42, (g) => {
+    g.fillStyle(0x5a5f3a, 1).fillTriangle(2, 21, 46, 10, 46, 32);
+    g.fillStyle(0x3f4a2e, 1).fillRect(22, 4, 16, 34);
+    g.fillStyle(0x2a2f1e, 1).fillRect(40, 14, 8, 14);
+    g.fillStyle(0x222222, 1).fillCircle(12, 21, 4);
   });
-  mk('stealth', 46, 16, (g) => {
-    g.fillStyle(0x2a2f55, 1).fillTriangle(0, 8, 46, 0, 46, 16); // dark delta
-    g.fillStyle(0x4a5285, 1).fillTriangle(0, 8, 24, 4, 24, 12);
+  mk('stealth', 48, 40, (g) => {
+    g.fillStyle(0x2a2f55, 1).fillTriangle(2, 20, 46, 6, 46, 34);
+    g.fillStyle(0x4a5285, 1).fillTriangle(2, 20, 26, 12, 26, 28);
   });
-  mk('witch', 34, 30, (g) => {
-    g.fillStyle(0x6b3fa0, 1).fillTriangle(10, 2, 4, 16, 22, 16); // hat
-    g.fillStyle(0x3a2a4a, 1).fillRect(6, 16, 16, 10);          // robe
-    g.fillStyle(0xe8c8a0, 1).fillCircle(13, 14, 4);            // face
-    g.fillStyle(0x8a5a2a, 1).fillRect(2, 24, 30, 2);          // broom
+  mk('witch', 40, 44, (g) => {
+    g.fillStyle(0x6b3fa0, 1).fillTriangle(20, 2, 8, 22, 32, 22);
+    g.fillStyle(0x3a2a4a, 1).fillRect(12, 22, 18, 16);
+    g.fillStyle(0xe8c8a0, 1).fillCircle(20, 20, 6);
+    g.fillStyle(0x8a5a2a, 1).fillRect(2, 34, 36, 4);
   });
-  mk('hero', 28, 36, (g) => {
-    g.fillStyle(0x2a44ff, 1).fillRect(8, 10, 12, 22);         // blue body
-    g.fillStyle(0xe8c8a0, 1).fillCircle(14, 8, 6);            // head
-    g.fillStyle(0xff3a3a, 1).fillTriangle(20, 12, 28, 20, 20, 28); // cape
-    g.fillStyle(0xffe24d, 1).fillRect(11, 16, 6, 4);          // emblem
+  mk('hero', 40, 48, (g) => {
+    g.fillStyle(0xff3a3a, 1).fillTriangle(20, 14, 38, 30, 20, 44); // cape trailing back
+    g.fillStyle(0x2a44ff, 1).fillRect(12, 14, 16, 30);            // vertical body
+    g.fillStyle(0xe8c8a0, 1).fillCircle(20, 10, 8);              // head
+    g.fillStyle(0xffe24d, 1).fillRect(16, 22, 8, 6);            // emblem
+    g.fillStyle(0x1a2aaa, 1).fillRect(12, 38, 6, 8).fillRect(22, 38, 6, 8); // legs
   });
-  mk('dragon', 48, 34, (g) => {
-    g.fillStyle(0x3aa84a, 1).fillEllipse(28, 18, 32, 20);     // body
-    g.fillStyle(0x3aa84a, 1).fillTriangle(0, 18, 14, 10, 14, 26); // head left
-    g.fillStyle(0xff5a3a, 1).fillCircle(4, 18, 2);            // mouth glow
-    g.fillStyle(0x267a32, 1).fillTriangle(30, 2, 40, 14, 24, 14); // wing
+  mk('dragon', 52, 44, (g) => {
+    g.fillStyle(0x3aa84a, 1).fillEllipse(30, 24, 38, 26);
+    g.fillStyle(0x3aa84a, 1).fillTriangle(2, 24, 18, 14, 18, 34);
+    g.fillStyle(0xff5a3a, 1).fillCircle(6, 24, 3);
+    g.fillStyle(0x267a32, 1).fillTriangle(32, 4, 46, 20, 26, 20);
+    g.fillStyle(0x1e5e28, 1).fillTriangle(46, 20, 52, 30, 42, 30);
   });
-  mk('dolphin', 40, 22, (g) => {
-    g.fillStyle(0x5ab0e8, 1).fillEllipse(22, 12, 32, 14);     // body
-    g.fillStyle(0x5ab0e8, 1).fillTriangle(0, 12, 10, 6, 10, 18); // nose left
-    g.fillStyle(0x3a90c8, 1).fillTriangle(28, 2, 38, 10, 24, 10); // fin
-    g.fillStyle(0xeaf6ff, 1).fillEllipse(22, 16, 20, 5);     // belly
+  mk('dolphin', 44, 40, (g) => {
+    g.fillStyle(0x5ab0e8, 1).fillEllipse(24, 22, 36, 22);
+    g.fillStyle(0x5ab0e8, 1).fillTriangle(2, 22, 12, 14, 12, 30);
+    g.fillStyle(0x3a90c8, 1).fillTriangle(28, 6, 40, 18, 24, 18);
+    g.fillStyle(0xeaf6ff, 1).fillEllipse(24, 28, 24, 8);
   });
 }
 
@@ -1219,9 +1230,9 @@ function createStartScreen(scene) {
   scene.tweens.add({ targets: title, scale: 1.03, alpha: 0.9, duration: 1100, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
 
   scene.startScreen.buttons = [];
-  const labels = ['PLAY', 'LEADERBOARD', 'CONTROLS'];
+  const labels = ['1 PLAYER', '2 PLAYERS', 'LEADERBOARD', 'CONTROLS'];
   for (let i = 0; i < labels.length; i += 1) {
-    const y = 240 + i * 52;
+    const y = 218 + i * 48;
     const bg = scene.add.rectangle(GAME_WIDTH / 2, y, 300, 44, COLORS.cell, 0.95).setStrokeStyle(2, COLORS.frame, 0.9);
     const label = scene.add.text(GAME_WIDTH / 2, y, labels[i], {
       fontFamily: 'monospace', fontSize: '22px', color: '#f3f7ff', fontStyle: 'bold',
@@ -1271,8 +1282,9 @@ function handleStartMenu(scene, time) {
   }
   menu.lastAxis = axisY;
   if (consumeAnyPressedControl(scene, ['P1_1', 'P2_1', 'START1', 'START2'])) {
-    if (menu.cursor === 0) startMatch(scene);
-    else if (menu.cursor === 1) showInfoScreen(scene, 'leaderboard');
+    if (menu.cursor === 0) startMatch(scene, 1);
+    else if (menu.cursor === 1) startMatch(scene, 2);
+    else if (menu.cursor === 2) showInfoScreen(scene, 'leaderboard');
     else showInfoScreen(scene, 'controls');
   }
 }
@@ -1304,14 +1316,15 @@ function showInfoScreen(scene, kind) {
 }
 
 // ---- Match lifecycle (expanded in later tasks) ----
-function startMatch(scene) {
+function startMatch(scene, numPlayers) {
   scene.startScreen.container.setVisible(false);
   scene.state.elapsed = 0;
   scene.state.intensity = 0;
   scene.state.score = 0;
   scene.state._bonusAcc = 0;
+  scene.state.numPlayers = numPlayers === 1 ? 1 : 2;
   if (scene.sound && scene.sound.context && scene.sound.context.state === 'suspended') scene.sound.context.resume();
-  createWorld(scene);
+  createWorld(scene, scene.state.numPlayers);
   createHud(scene);
   scene.physics.resume();
   scene.state.phase = 'playing';
