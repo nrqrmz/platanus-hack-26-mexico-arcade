@@ -14,14 +14,14 @@ const PLAY = { minX: 30, maxX: 770, minY: 64, maxY: 560 };
 const TUNING = {
   player: { speed: 300, radius: 16, maxHp: 100, lives: 3, invuln: 1500, regenPerSec: 0 }, // 0 = no passive regen by default; raised by the HP REGEN upgrade.
   enemyCapHard: 24,
-  maxDucks: 6,
-  spawn: { baseInterval: 1700, minInterval: 480, soloMul: 1.6 },
+  maxEggs: 9,
+  spawn: { baseInterval: 1700, minInterval: 480, soloMul: 1.6, varietyMs: 3000 },
   intensity: { rampPerSec: 0.007, hpScalePerUnit: 0.18, speedScalePerUnit: 0.03 },
-  xp: { base: 6, growth: 1.35 }, // xp needed for level n = base * growth^(n-1), rounded
+  xp: { base: 4, growth: 1.18 }, // xp needed for level n = base * growth^(n-1), rounded
   scoreTimeBonusPerSec: 2,
   abilities: {
     laser:  { cd: 900,  baseDmg: 14, len: 360 },
-    flame:  { cd: 600,  baseDmg: 4,  range: 120 },
+    flame:  { cd: 3000, dur: 1400, dps: 26, range: 150 },
     shield: { cd: 6000, dur: 4000, orbDmg: 10 },
     bomb:   { cd: 8000, baseR: 80,  dmg: 40 },
     cloak:  { cd: 9000, dur: 3000 },
@@ -46,17 +46,19 @@ const COLORS = {
   egg: 0xfff2c8,
 };
 
+// minI = intensity needed to unlock (≈ seconds × 0.007). `max` = concurrent on-screen cap
+// (omit `max` for the common fodder so they fill the remaining slots up to enemyCapHard).
 const ENEMY_TYPES = {
-  plane:      { tex: 'plane',      hp: 6,  speed: 150, dmgRes: 1,   weight: 10, minI: 0,   score: 10,  xp: 2, radius: 20, attack: 'none',     contact: 8,  bob: 0 },
-  helicopter: { tex: 'helicopter', hp: 10, speed: 90,  dmgRes: 1,   weight: 9,  minI: 0,   score: 12,  xp: 2, radius: 20, attack: 'straight', contact: 8,  bob: 28, fireMs: 1600, bDmg: 6 },
-  duck:       { tex: 'duck',       hp: 16, speed: 110, dmgRes: 1,   weight: 7,  minI: 0.3, score: 18,  xp: 3, radius: 20, attack: 'duck',     contact: 10, bob: 18 },
-  fighter:    { tex: 'fighter',    hp: 14, speed: 160, dmgRes: 1,   weight: 7,  minI: 0.8, score: 20,  xp: 3, radius: 20, attack: 'aimed',    contact: 12, bob: 0,  fireMs: 1500, bDmg: 12 },
-  warplane:   { tex: 'warplane',   hp: 26, speed: 120, dmgRes: 1,   weight: 6,  minI: 1.2, score: 26,  xp: 4, radius: 21, attack: 'straight', contact: 14, bob: 0,  fireMs: 1100, bDmg: 12 },
-  stealth:    { tex: 'stealth',    hp: 12, speed: 190, dmgRes: 1,   weight: 5,  minI: 2.0, score: 30,  xp: 5, radius: 20, attack: 'aimed',    contact: 16, bob: 0,  fireMs: 1700, bDmg: 16, alpha: 0.35 },
-  witch:      { tex: 'witch',      hp: 34, speed: 110, dmgRes: 0.6, weight: 5,  minI: 1.6, score: 34,  xp: 5, radius: 20, attack: 'aimed',    contact: 12, bob: 40, fireMs: 1400, bDmg: 12, bColor: 0x9fe0ff },
-  dragon:     { tex: 'dragon',     hp: 40, speed: 80,  dmgRes: 0.7, weight: 4,  minI: 2.4, score: 44,  xp: 7, radius: 22, attack: 'dragon',   contact: 14, bob: 24 },
-  dolphin:    { tex: 'dolphin',    hp: 18, speed: 150, dmgRes: 1,   weight: 4,  minI: 1.8, score: 28,  xp: 4, radius: 20, attack: 'dolphin',  contact: 10, bob: 60, fireMs: 1600 },
-  hero:       { tex: 'hero',       hp: 60, speed: 70,  dmgRes: 0.1, weight: 3,  minI: 3.0, score: 80,  xp: 12, radius: 20, attack: 'hero',    contact: 20, bob: 0,  fireMs: 2600 },
+  plane:      { tex: 'plane',      hp: 6,  speed: 150, dmgRes: 1,   weight: 10, minI: 0,    score: 10,  xp: 2, radius: 20, attack: 'none',     contact: 8,  bob: 0 },
+  helicopter: { tex: 'helicopter', hp: 10, speed: 90,  dmgRes: 1,   weight: 9,  minI: 0,    score: 12,  xp: 2, radius: 20, attack: 'straight', contact: 8,  bob: 28, fireMs: 1600, bDmg: 6 },
+  fighter:    { tex: 'fighter',    hp: 14, speed: 160, dmgRes: 1,   weight: 7,  minI: 0.07, score: 20,  xp: 3, radius: 20, attack: 'aimed',    contact: 12, bob: 0,  fireMs: 1500, bDmg: 12 },
+  warplane:   { tex: 'warplane',   hp: 26, speed: 120, dmgRes: 1,   weight: 6,  minI: 0.14, score: 26,  xp: 4, radius: 21, attack: 'straight', contact: 14, bob: 0,  fireMs: 1100, bDmg: 12 },
+  duck:       { tex: 'duck',       hp: 16, speed: 110, dmgRes: 1,   weight: 7,  minI: 0.21, score: 18,  xp: 3, radius: 20, attack: 'duck',     contact: 10, bob: 18, max: 3 },
+  dolphin:    { tex: 'dolphin',    hp: 18, speed: 150, dmgRes: 1,   weight: 4,  minI: 0.28, score: 28,  xp: 4, radius: 20, attack: 'dolphin',  contact: 10, bob: 60, fireMs: 1600, max: 1 },
+  witch:      { tex: 'witch',      hp: 34, speed: 110, dmgRes: 0.6, weight: 5,  minI: 0.35, score: 34,  xp: 5, radius: 20, attack: 'aimed',    contact: 12, bob: 40, fireMs: 1400, bDmg: 12, bColor: 0x9fe0ff, max: 3 },
+  stealth:    { tex: 'stealth',    hp: 12, speed: 190, dmgRes: 1,   weight: 5,  minI: 0.42, score: 30,  xp: 5, radius: 20, attack: 'aimed',    contact: 16, bob: 0,  fireMs: 1700, bDmg: 16, alpha: 0.35, max: 2 },
+  dragon:     { tex: 'dragon',     hp: 40, speed: 80,  dmgRes: 0.7, weight: 4,  minI: 0.49, score: 44,  xp: 7, radius: 22, attack: 'dragon',   contact: 14, bob: 24, max: 1 },
+  hero:       { tex: 'hero',       hp: 60, speed: 70,  dmgRes: 0.1, weight: 3,  minI: 0.56, score: 80,  xp: 12, radius: 20, attack: 'hero',    contact: 20, bob: 0,  fireMs: 2600, max: 1 },
 };
 
 const UPGRADES = [
@@ -195,11 +197,13 @@ function update(time, delta) {
     handlePlayerFire(scene, time);
     updatePlayerBullets(scene);
     updateSpawner(scene, time, delta);
+    updateVarietyFill(scene, time, delta);
     updateEnemies(scene, time);
     updateEnemyBullets(scene);
     updateEggs(scene, time);
     updateHazards(scene, time, delta);
     updateShieldOrbs(scene, time);
+    updateFlames(scene, time, delta);
     refreshHud(scene);
     if (consumeAnyPressedControl(scene, ['START1', 'START2'])) pauseMatch(scene);
     return;
@@ -286,6 +290,7 @@ function createWorld(scene, numPlayers) {
     hazards: scene.add.group(),   // fire columns (manual overlap)
     orbs: scene.add.group(),      // shield orbs (manual overlap)
     spawnTimer: 0,
+    varietyTimer: 0,
     levelQueue: [],
   };
   const solo = numPlayers === 1;
@@ -302,7 +307,7 @@ function destroyWorld(scene) {
   scene.world.eggs.clear(true, true);
   scene.world.hazards.clear(true, true);
   scene.world.orbs.clear(true, true);
-  for (const p of scene.world.players) p.sprite.destroy();
+  for (const p of scene.world.players) { p.sprite.destroy(); if (p.flameGfx) p.flameGfx.destroy(); }
   scene.world = null;
 }
 
@@ -713,7 +718,7 @@ function handlePlayerFire(scene, time) {
     const prefix = p.key === 'p1' ? 'P1' : 'P2';
     if (isControlHeld(scene, `${prefix}_1`)) fireBasic(scene, p, time);
     if (scene.controls.pressed[`${prefix}_2`] && p.abilities.laser.unlocked) { scene.controls.pressed[`${prefix}_2`] = false; tryAbility(scene, p, 'laser', time, () => fireLaser(scene, p, time)); }
-    if (scene.controls.pressed[`${prefix}_3`] && p.abilities.flame.unlocked) { scene.controls.pressed[`${prefix}_3`] = false; tryAbility(scene, p, 'flame', time, () => fireFlame(scene, p, time)); }
+    if (scene.controls.pressed[`${prefix}_3`] && p.abilities.flame.unlocked) { scene.controls.pressed[`${prefix}_3`] = false; tryAbility(scene, p, 'flame', time, () => activateFlame(scene, p, time)); }
     if (scene.controls.pressed[`${prefix}_4`] && p.abilities.shield.unlocked) { scene.controls.pressed[`${prefix}_4`] = false; tryAbility(scene, p, 'shield', time, () => activateShield(scene, p, time)); }
     if (scene.controls.pressed[`${prefix}_5`] && p.abilities.bomb.unlocked) { scene.controls.pressed[`${prefix}_5`] = false; tryAbility(scene, p, 'bomb', time, () => fireBomb(scene, p, time)); }
     if (scene.controls.pressed[`${prefix}_6`] && p.abilities.cloak.unlocked) { scene.controls.pressed[`${prefix}_6`] = false; tryAbility(scene, p, 'cloak', time, () => activateCloak(scene, p, time)); }
@@ -721,7 +726,8 @@ function handlePlayerFire(scene, time) {
 }
 
 function tryAbility(scene, p, id, time, fn) {
-  const cd = TUNING.abilities[id].cd;
+  const lv = p.abilities[id].level;
+  const cd = TUNING.abilities[id].cd * Math.max(0.5, 1 - (lv - 1) * 0.08); // each level trims cooldown, floor 50%
   if ((p.fireCooldown[id] || 0) > time) return;
   p.fireCooldown[id] = time + cd;
   fn();
@@ -763,27 +769,48 @@ function fireLaser(scene, p, time) {
   const lv = p.abilities.laser.level;
   const cfg = TUNING.abilities.laser;
   const dmg = cfg.baseDmg + (lv - 1) * 8;
-  const b = spawnPlayerBullet(scene, p, p.sprite.x + 18, p.sprite.y, 900, 0, dmg);
-  b.setTint(0x9fe0ff).setScale(1.6, 1.2);
+  const b = spawnPlayerBullet(scene, p, p.sprite.x + 40, p.sprite.y, 900, 0, dmg);
+  b.setTint(0x9fe0ff).setScale(4.6, 1.5);
   b.pierce = 2 + lv;
   playSound(scene, 'laser');
 }
 
-function fireFlame(scene, p, time) {
+function activateFlame(scene, p, time) {
   const lv = p.abilities.flame.level;
   const cfg = TUNING.abilities.flame;
-  const range = cfg.range + lv * 16;
-  const dmg = cfg.baseDmg + lv * 2;
-  scene.world.enemies.children.iterate((e) => {
-    if (!e || !e.active) return;
-    if (e.x > p.sprite.x && e.x < p.sprite.x + range && Math.abs(e.y - p.sprite.y) < 40 + lv * 4) {
-      e.hp -= dmg * (e.def.dmgRes != null ? e.def.dmgRes : 1);
-      if (e.hp <= 0) killEnemy(scene, e, p.key);
-    }
-  });
-  const cone = scene.add.triangle(p.sprite.x + 16, p.sprite.y, 0, -24, range, -8, range, 8, 0xff9a3a, 0.5).setDepth(6);
-  scene.tweens.add({ targets: cone, alpha: 0, duration: 180, onComplete: () => cone.destroy() });
+  p.flameUntil = time + cfg.dur + lv * 150; // sustained flame stream in front of the UFO
+  if (!p.flameGfx) p.flameGfx = scene.add.graphics().setDepth(6);
   playSound(scene, 'flame');
+}
+
+function updateFlames(scene, time, delta) {
+  const d = delta / 1000;
+  for (const p of scene.world.players) {
+    if (!p.flameGfx) continue;
+    if (!p.alive || time >= (p.flameUntil || 0)) { p.flameGfx.destroy(); p.flameGfx = null; continue; }
+    const lv = p.abilities.flame.level;
+    const cfg = TUNING.abilities.flame;
+    const range = cfg.range + lv * 20;
+    const halfH = 22 + lv * 3;
+    const dps = cfg.dps + lv * 5;
+    const ox = p.sprite.x;
+    const oy = p.sprite.y;
+    scene.world.enemies.children.iterate((e) => {
+      if (!e || !e.active) return;
+      const dx = e.x - ox;
+      if (dx > 4 && dx < range && Math.abs(e.y - oy) < halfH * (0.4 + 0.6 * dx / range)) {
+        e.hp -= dps * d * (e.def.dmgRes != null ? e.def.dmgRes : 1);
+        if (e.hp <= 0) killEnemy(scene, e, p.key);
+      }
+    });
+    const g = p.flameGfx;
+    g.clear();
+    g.setPosition(ox, oy);
+    const flick = range * (0.85 + Math.random() * 0.15);
+    g.fillStyle(0xff5a1a, 0.32); g.fillTriangle(14, -halfH, 14, halfH, flick, 0);
+    g.fillStyle(0xffa83a, 0.5); g.fillTriangle(14, -halfH * 0.62, 14, halfH * 0.62, flick * 0.82, 0);
+    g.fillStyle(0xffe87a, 0.7); g.fillTriangle(16, -halfH * 0.3, 16, halfH * 0.3, flick * 0.55, 0);
+  }
 }
 
 function activateShield(scene, p, time) {
@@ -845,28 +872,53 @@ function activateCloak(scene, p, time) {
 function isCloaked(p, time) { return time < (p.cloakUntil || 0); }
 
 // ---- Enemies ----
-function countDucks(scene) {
+function countType(scene, name) {
   let n = 0;
-  scene.world.enemies.children.iterate((e) => { if (e && e.active && e.etype === 'duck') n += 1; });
+  scene.world.enemies.children.iterate((e) => { if (e && e.active && e.etype === name) n += 1; });
   return n;
+}
+
+function atTypeCap(scene, name) {
+  const m = ENEMY_TYPES[name].max;
+  return m != null && countType(scene, name) >= m;
 }
 
 function pickEnemyType(scene) {
   const I = scene.state.intensity;
-  const duckCapped = countDucks(scene) >= TUNING.maxDucks;
   const pool = [];
   let total = 0;
   for (const [name, def] of Object.entries(ENEMY_TYPES)) {
     if (I < def.minI) continue;
-    if (name === 'duck' && duckCapped) continue; // don't flood the screen with ducks
+    if (atTypeCap(scene, name)) continue; // respect per-type concurrent caps
     const w = def.weight * (1 + Math.max(0, I - def.minI) * 0.15); // tougher enemies grow more common as intensity rises
     total += w;
     pool.push({ name, acc: total });
   }
-  if (!pool.length) return 'plane';
+  if (!pool.length) return null;
   const r = Phaser.Math.FloatBetween(0, total);
   for (const e of pool) if (r <= e.acc) return e.name;
   return pool[pool.length - 1].name;
+}
+
+// Variety fill: force-spawn capped/special types so the board shows the full roster.
+function updateVarietyFill(scene, time, delta) {
+  const w = scene.world;
+  w.varietyTimer = (w.varietyTimer || 0) - delta;
+  if (w.varietyTimer > 0) return;
+  w.varietyTimer = TUNING.spawn.varietyMs;
+  if (w.enemies.countActive(true) >= TUNING.enemyCapHard) return;
+  const I = scene.state.intensity;
+  const candidates = [];
+  for (const [name, def] of Object.entries(ENEMY_TYPES)) {
+    if (def.max == null) continue;            // commons are handled by the weighted spawner
+    if (I < def.minI) continue;               // not unlocked yet
+    if (countType(scene, name) >= def.max) continue; // already at its cap
+    candidates.push(name);
+  }
+  if (!candidates.length) return;
+  const absent = candidates.filter((n) => countType(scene, n) === 0);
+  const pool = absent.length ? absent : candidates; // ensure one of each first, then top up
+  spawnEnemy(scene, pool[Phaser.Math.Between(0, pool.length - 1)], 820, Phaser.Math.Between(80, 540));
 }
 
 function spawnEnemy(scene, name, x, y) {
@@ -902,7 +954,8 @@ function updateSpawner(scene, time, delta) {
   const count = w.enemies.countActive(true);
   if (w.spawnTimer <= 0 && count < TUNING.enemyCapHard) {
     w.spawnTimer = interval;
-    spawnEnemy(scene, pickEnemyType(scene), 820, Phaser.Math.Between(80, 540));
+    const name = pickEnemyType(scene);
+    if (name) spawnEnemy(scene, name, 820, Phaser.Math.Between(80, 540));
   }
 }
 
@@ -962,7 +1015,7 @@ function updateEggs(scene, time) {
   scene.world.eggs.children.iterate((egg) => {
     if (!egg || !egg.active) return;
     if (time >= egg.hatchAt) {
-      if (scene.world.enemies.countActive(true) < TUNING.enemyCapHard && countDucks(scene) < TUNING.maxDucks) {
+      if (scene.world.enemies.countActive(true) < TUNING.enemyCapHard && !atTypeCap(scene, 'duck')) {
         spawnEnemy(scene, 'duck', egg.x, egg.y);
         recycle(egg);
         playSound(scene, 'hatch');
@@ -1029,9 +1082,11 @@ function updateEnemyAI(scene, e, time) {
     if (e.ai.laid < 3) {
       if (!e.ai.nextEgg) e.ai.nextEgg = time + 3000;
       if (time >= e.ai.nextEgg) {
-        layEgg(scene, Phaser.Math.Between(PLAY.minX + 40, PLAY.maxX), Phaser.Math.Between(PLAY.minY + 20, PLAY.maxY));
-        e.ai.laid += 1;
-        e.ai.nextEgg = time + 3000;
+        if (scene.world.eggs.countActive(true) < TUNING.maxEggs) {
+          layEgg(scene, Phaser.Math.Between(PLAY.minX + 40, PLAY.maxX), Phaser.Math.Between(PLAY.minY + 20, PLAY.maxY));
+          e.ai.laid += 1;
+        }
+        e.ai.nextEgg = time + 3000; // retry next cycle (waits if egg cap reached)
       }
     } else if (!e.ai.kamikaze) {
       e.ai.kamikaze = true;
@@ -1187,10 +1242,14 @@ function buildTextures(scene) {
     g.fillStyle(0x4a5285, 1).fillTriangle(2, 20, 26, 12, 26, 28);
   });
   mk('witch', 40, 44, (g) => {
-    g.fillStyle(0x6b3fa0, 1).fillTriangle(20, 2, 8, 22, 32, 22);
-    g.fillStyle(0x3a2a4a, 1).fillRect(12, 22, 18, 16);
-    g.fillStyle(0xe8c8a0, 1).fillCircle(20, 20, 6);
-    g.fillStyle(0x8a5a2a, 1).fillRect(2, 34, 36, 4);
+    g.fillStyle(0x6a4a2a, 1).fillRect(3, 30, 28, 3);                                            // broom handle
+    g.fillStyle(0xc89a4a, 1).fillTriangle(29, 25, 40, 31, 29, 38);                              // bristles (back)
+    g.fillStyle(0x2a1e3a, 1).fillPoints([{ x: 13, y: 18 }, { x: 25, y: 18 }, { x: 29, y: 33 }, { x: 9, y: 33 }], true); // cloak
+    g.fillStyle(0xe8c8a0, 1).fillCircle(17, 16, 5);                                            // face
+    g.fillStyle(0x140a22, 1).fillCircle(15, 16, 1.4);                                          // eye
+    g.fillStyle(0x6b2fa0, 1).fillTriangle(5, 9, 16, 5, 19, 15);                                // hat cone (tilted left)
+    g.fillStyle(0x4a1f70, 1).fillEllipse(13, 15, 20, 4);                                       // hat brim
+    g.fillStyle(0xffe24d, 1).fillCircle(10, 9, 1.2);                                          // star
   });
   mk('hero', 40, 48, (g) => {
     g.fillStyle(0xff3a3a, 1).fillTriangle(20, 14, 38, 30, 20, 44); // cape trailing back
@@ -1200,17 +1259,23 @@ function buildTextures(scene) {
     g.fillStyle(0x1a2aaa, 1).fillRect(12, 38, 6, 8).fillRect(22, 38, 6, 8); // legs
   });
   mk('dragon', 52, 44, (g) => {
-    g.fillStyle(0x3aa84a, 1).fillEllipse(30, 24, 38, 26);
-    g.fillStyle(0x3aa84a, 1).fillTriangle(2, 24, 18, 14, 18, 34);
-    g.fillStyle(0xff5a3a, 1).fillCircle(6, 24, 3);
-    g.fillStyle(0x267a32, 1).fillTriangle(32, 4, 46, 20, 26, 20);
-    g.fillStyle(0x1e5e28, 1).fillTriangle(46, 20, 52, 30, 42, 30);
+    g.fillStyle(0x2e8a3c, 1).fillPoints([{ x: 30, y: 14 }, { x: 48, y: 3 }, { x: 47, y: 16 }, { x: 40, y: 13 }, { x: 45, y: 24 }], true); // wing
+    g.fillStyle(0x3aa84a, 1).fillEllipse(32, 27, 30, 22);                                       // body
+    g.fillStyle(0x3aa84a, 1).fillTriangle(48, 26, 52, 18, 52, 34);                              // tail fin
+    g.fillStyle(0x3aa84a, 1).fillPoints([{ x: 30, y: 20 }, { x: 13, y: 13 }, { x: 3, y: 17 }, { x: 4, y: 24 }, { x: 14, y: 26 }, { x: 26, y: 28 }], true); // neck + head
+    g.fillStyle(0x267a32, 1).fillTriangle(9, 13, 14, 4, 17, 14);                                // horn
+    g.fillStyle(0xffd23a, 1).fillCircle(10, 17, 2);                                            // eye
+    g.fillStyle(0x1d5a26, 1).fillTriangle(3, 20, 3, 25, 11, 23);                                // jaw
+    g.fillStyle(0xff6a2a, 1).fillCircle(4, 22, 1.6);                                           // fire spark
+    g.fillStyle(0x2e8a3c, 1).fillRect(24, 37, 5, 6).fillRect(34, 37, 5, 6);                     // legs
   });
   mk('dolphin', 44, 40, (g) => {
-    g.fillStyle(0x5ab0e8, 1).fillEllipse(24, 22, 36, 22);
-    g.fillStyle(0x5ab0e8, 1).fillTriangle(2, 22, 12, 14, 12, 30);
-    g.fillStyle(0x3a90c8, 1).fillTriangle(28, 6, 40, 18, 24, 18);
-    g.fillStyle(0xeaf6ff, 1).fillEllipse(24, 28, 24, 8);
+    g.fillStyle(0x3a90c8, 1).fillTriangle(36, 18, 44, 8, 44, 28);                               // tail fluke
+    g.fillStyle(0x4aa0e0, 1).fillPoints([{ x: 2, y: 25 }, { x: 14, y: 15 }, { x: 30, y: 14 }, { x: 40, y: 19 }, { x: 36, y: 25 }, { x: 22, y: 30 }, { x: 9, y: 29 }], true); // body (nose left)
+    g.fillStyle(0x4aa0e0, 1).fillTriangle(19, 14, 27, 3, 31, 15);                               // dorsal fin
+    g.fillStyle(0xdff0ff, 1).fillEllipse(20, 26, 22, 7);                                        // belly
+    g.fillStyle(0x2f7aa8, 1).fillTriangle(2, 25, 10, 22, 10, 28);                               // snout tip
+    g.fillStyle(0x10283a, 1).fillCircle(11, 21, 1.8);                                          // eye
   });
 }
 
